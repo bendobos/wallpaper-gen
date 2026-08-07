@@ -1,4 +1,11 @@
-import { DEFAULTS, PARAM_LIST, PARAM_SCHEMA, type ParamKey, type Params } from './schema';
+import {
+  DEFAULTS,
+  PARAM_LIST,
+  PARAM_SCHEMA,
+  type ParamDef,
+  type ParamKey,
+  type Params,
+} from './schema';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -59,28 +66,81 @@ export function decodeParams(s: string): Params | null {
 
 function snap(value: number, step: number, min: number): number {
   if (step <= 0) return value;
-  return min + Math.round((value - min) / step) * step;
+  const snapped = min + Math.round((value - min) / step) * step;
+  // Strip float representation noise: without this, snapping 0.36 can yield
+  // 0.35000000000000003, which displays identically but fails an equality
+  // check — enough to dirty the URL and push a no-op undo entry.
+  return Math.round(snapped * 1e6) / 1e6;
 }
 
 export function randomSeed(): number {
   return Math.floor(Math.random() * 10000);
 }
 
+type Explorable = Extract<ParamDef, { kind: 'slider' | 'select' }> & {
+  random: readonly [number, number];
+};
+
 /**
- * Samples every parameter that declares a `random` band. Parameters without one
- * (colours, phase, loopSeconds) are left alone deliberately — randomising those makes
- * results worse, not more interesting.
+ * Parameters that take part in random exploration: everything declaring a
+ * `random` band. Those without one (colours, phase, loopSeconds) are left alone
+ * deliberately — randomising them makes results worse, not more interesting.
  */
+function explorable(): Explorable[] {
+  return PARAM_LIST.filter(
+    (d): d is Explorable => d.kind !== 'color' && !!d.random,
+  );
+}
+
+/** Clamps a raw value onto a parameter's own grid. */
+function fit(def: Explorable, v: number): number {
+  return def.kind === 'select'
+    ? Math.min(def.options.length - 1, Math.max(0, Math.round(v)))
+    : Math.min(def.max, Math.max(def.min, snap(v, def.step, def.min)));
+}
+
+/**
+ * Chaotic parameters, where a small change is not a small change.
+ *
+ * `seed` indexes into noise space through a hash, so nudging it by 1 gives a
+ * completely unrelated composition. Including it in a *mutation* would defeat
+ * the point of exploring the neighbourhood of a look — the Seed button is there
+ * when a new composition is what you want.
+ */
+const CHAOTIC = new Set<string>(['seed']);
+
+/** Box-Muller normal deviate. */
+function gauss(): number {
+  const u = Math.random() || 1e-9;
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+/** Samples every explorable parameter uniformly across its band. */
 export function randomizeParams(current: Params): Params {
   const out = { ...current } as Record<string, number | string>;
-  for (const def of PARAM_LIST) {
-    if (def.kind === 'color' || !def.random) continue;
+  for (const def of explorable()) {
     const [lo, hi] = def.random;
-    const v = lo + Math.random() * (hi - lo);
-    out[def.key] =
-      def.kind === 'select'
-        ? Math.min(def.options.length - 1, Math.max(0, Math.round(v)))
-        : Math.min(def.max, Math.max(def.min, snap(v, def.step, def.min)));
+    out[def.key] = fit(def, lo + Math.random() * (hi - lo));
+  }
+  return out as Params;
+}
+
+/**
+ * Nudges every explorable parameter around its *current* value, rather than
+ * resampling it. `spread` of 0 reproduces the input; 1 wanders about a third of
+ * each band per step.
+ *
+ * Clamping is to the parameter's full range, not to its band: a preset may
+ * legitimately sit outside the band, and yanking it back in would change the
+ * look rather than vary it.
+ */
+export function mutateParams(current: Params, spread: number): Params {
+  const out = { ...current } as Record<string, number | string>;
+  for (const def of explorable()) {
+    if (CHAOTIC.has(def.key)) continue;
+    const [lo, hi] = def.random;
+    const sigma = (hi - lo) * spread * 0.35;
+    out[def.key] = fit(def, Number(current[def.key as ParamKey]) + gauss() * sigma);
   }
   return out as Params;
 }

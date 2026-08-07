@@ -17,6 +17,7 @@ import ControlPanel from './ui/ControlPanel';
 import PresetBar from './ui/PresetBar';
 import ExportDialog from './ui/ExportDialog';
 import LoopSpeed from './ui/LoopSpeed';
+import VariationsGrid from './ui/VariationsGrid';
 
 const MAX_UNDO = 60;
 
@@ -46,6 +47,7 @@ export default function App() {
   const [quality, setQuality] = useState(0.75);
   const [playing, setPlaying] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showVariations, setShowVariations] = useState(false);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [userPresets, setUserPresets] = useState<StoredPreset[]>(() => loadUserPresets());
   const [displaySize, setDisplaySize] = useState({ w: 640, h: 360 });
@@ -357,6 +359,9 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'e') {
         e.preventDefault();
         openExport();
+      } else if (e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        setShowVariations((v) => !v);
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleImmersive();
@@ -432,6 +437,13 @@ export default function App() {
           >
             ✦ Randomize
           </button>
+          <button
+            className="btn"
+            onClick={() => setShowVariations(true)}
+            title="Explore variations of this look (V)"
+          >
+            ▦ Variations
+          </button>
           <button className="btn" onClick={undo} title="Undo (Ctrl+Z)">
             ↶ Undo
           </button>
@@ -506,6 +518,21 @@ export default function App() {
           size={output}
           onSizeChange={setOutput}
           onClose={() => setShowExport(false)}
+        />
+      )}
+
+      {showVariations && rendererRef.current && (
+        <VariationsGrid
+          renderer={rendererRef.current}
+          params={params}
+          time={timeRef.current}
+          aspect={output.width / output.height}
+          onPick={(next) => {
+            pushUndo();
+            setParams(next);
+            setActivePreset(null);
+          }}
+          onClose={() => setShowVariations(false)}
         />
       )}
 

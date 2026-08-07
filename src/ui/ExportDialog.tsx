@@ -387,7 +387,8 @@ export default function ExportDialog({
 
               <p className="note">
                 The clip contains <strong>exactly one seamless loop</strong> — loop duration sets
-                how long it takes. The Speed slider only affects the live preview.
+                how long it takes. The preview has its own loop duration next to Play, which
+                does not affect the file.
               </p>
               <p className="note">
                 {frameCount} frames · {even.width}×{even.height} · ~{(estBytes / 1e6).toFixed(0)} MB

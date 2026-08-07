@@ -16,6 +16,7 @@ import {
 import ControlPanel from './ui/ControlPanel';
 import PresetBar from './ui/PresetBar';
 import ExportDialog from './ui/ExportDialog';
+import LoopSpeed from './ui/LoopSpeed';
 
 const MAX_UNDO = 60;
 
@@ -147,9 +148,12 @@ export default function App() {
       last = now;
 
       if (playingRef.current) {
-        // The shader's period is exactly 1.0, so wrapping here keeps the clock
-        // bounded and means the phase committed on pause is always in range.
-        timeRef.current = (timeRef.current + dt * paramsRef.current.speed) % 1;
+        // One phase unit is one full loop, so advancing by dt/loopSeconds makes
+        // a loop take exactly that many seconds. The shader's period is 1.0, so
+        // wrapping keeps the clock bounded and the phase committed on pause is
+        // always in range.
+        const seconds = Math.max(0.1, paramsRef.current.loopSeconds);
+        timeRef.current = (timeRef.current + dt / seconds) % 1;
         dirtyRef.current = true;
       }
 
@@ -400,6 +404,12 @@ export default function App() {
           <button className="btn" onClick={togglePlay} title="Play / pause (Space)">
             {playing ? '❚❚ Pause' : '▶ Play'}
           </button>
+
+          <LoopSpeed
+            value={params.loopSeconds}
+            onChange={(v) => setParams((p) => ({ ...p, loopSeconds: v }))}
+            onCommitStart={pushUndo}
+          />
           <button
             className="btn"
             onClick={() => {

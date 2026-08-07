@@ -82,7 +82,7 @@ export class LiquidRenderer {
 
   private uploadParams(u: UniformCache, params: Params, time: number, dither: boolean) {
     for (const def of PARAM_LIST) {
-      if (!def.uniform) continue; // app-side only (phase, speed)
+      if (!def.uniform) continue; // app-side only (phase, loopSeconds)
       const value = params[def.key as keyof Params];
       if (def.kind === 'color') {
         const [r, g, b] = hexToRgb(value as string);

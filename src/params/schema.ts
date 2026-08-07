@@ -23,6 +23,8 @@ interface Base {
   /** Shader uniform to upload to. Omitted for values the app consumes itself. */
   readonly uniform?: string;
   readonly hint?: string;
+  /** Kept out of the control panel; surfaced elsewhere in the UI instead. */
+  readonly hidden?: boolean;
 }
 
 export interface SliderDef extends Base {
@@ -98,9 +100,12 @@ export const PARAM_SCHEMA = [
   { kind: 'slider', key: 'motion', label: 'Motion', group: 'Flow', uniform: 'uMotion',
     min: 0, max: 0.4, step: 0.001, default: 0.06, random: [0.02, 0.15],
     hint: 'How far each noise layer travels over one loop. Affects the animation only — at Phase 0 the still image is identical at any value.' },
-  { kind: 'slider', key: 'speed', label: 'Speed', group: 'Flow',
-    min: 0, max: 2, step: 0.01, default: 0.35,
-    hint: 'Preview playback rate only. Video export sets its own loop duration.' },
+  // Lives next to the Play button rather than in the panel, so it is hidden
+  // here. Still part of the schema so it serialises into the URL like anything
+  // else. Expressed in seconds to match the export dialog's loop duration.
+  { kind: 'slider', key: 'loopSeconds', label: 'Loop Duration', group: 'Flow', hidden: true,
+    min: 2, max: 15, step: 0.5, default: 15,
+    hint: 'How long one full loop of the preview takes. Video export sets its own duration.' },
 
   // ---------------------------------------------------------------- surface
   { kind: 'slider', key: 'relief', label: 'Relief', group: 'Surface', uniform: 'uRelief',
@@ -200,8 +205,9 @@ export const DEFAULTS: Params = Object.fromEntries(
   PARAM_SCHEMA.map((d) => [d.key, d.default]),
 ) as Params;
 
+/** Drives the control panel, so `hidden` params are filtered out here. */
 export const BY_GROUP: ReadonlyArray<readonly [Group, readonly ParamDef[]]> = GROUPS.map(
-  (g) => [g, PARAM_SCHEMA.filter((d) => d.group === g)] as const,
+  (g) => [g, PARAM_LIST.filter((d) => d.group === g && !d.hidden)] as const,
 );
 
 export const SCHEMA_BY_KEY = new Map<string, ParamDef>(

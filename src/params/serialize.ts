@@ -68,7 +68,7 @@ export function randomSeed(): number {
 
 /**
  * Samples every parameter that declares a `random` band. Parameters without one
- * (colours, phase, speed) are left alone deliberately — randomising those makes
+ * (colours, phase, loopSeconds) are left alone deliberately — randomising those makes
  * results worse, not more interesting.
  */
 export function randomizeParams(current: Params): Params {

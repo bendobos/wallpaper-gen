@@ -141,6 +141,28 @@ canvas {
   white-space: nowrap;
 }
 
+/* Preview loop duration, paired with the Play button. */
+.loop-speed {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 8px;
+  cursor: pointer;
+}
+
+.loop-speed input[type='range'] {
+  width: 84px;
+}
+
+.loop-speed .readout {
+  min-width: 34px;
+  text-align: right;
+}
+
+.loop-speed:hover .readout {
+  color: var(--text);
+}
+
 /* ----------------------------------------------------------------- panel */
 
 .panel {

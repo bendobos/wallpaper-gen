@@ -107,7 +107,8 @@ Three details make this work:
   phase 1 are byte-identical.
 
 The clip contains exactly one loop; **Loop duration** sets how long that loop
-takes. The Speed slider affects only the live preview. **Motion** controls how
+takes. The preview has its own loop duration next to the Play button, in the
+same unit, which does not affect the file. **Motion** controls how
 far the field travels over a loop.
 
 Trade-off: motion reads as churning rather than directional flow. That is

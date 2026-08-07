@@ -93,6 +93,43 @@ canvas {
   flex-wrap: wrap;
 }
 
+/* ------------------------------------------------------------- immersive */
+
+/* Applied alongside native fullscreen, and on its own where the Fullscreen API
+   isn't available on elements (iPhone Safari). */
+.stage.immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #000;
+}
+
+.stage.immersive .canvas-wrap {
+  padding: 0;
+}
+
+.stage.immersive .canvas-frame {
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Floats over the image rather than taking a slice of it. */
+.stage.immersive .stage-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #0a0a0cd9;
+  backdrop-filter: blur(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.stage.immersive .stage-bar.hidden {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
 .stage-bar .spacer {
   flex: 1;
 }

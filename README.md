@@ -134,7 +134,15 @@ inherent to any seamless loop.
 
 ## Shortcuts
 
-`Space` play/pause · `R` randomize · `S` new seed · `E` export · `Ctrl+Z` undo
+`Space` play/pause · `R` randomize · `S` new seed · `E` export · `F` fullscreen ·
+`Esc` leave fullscreen · `Ctrl+Z` undo
+
+Fullscreen hides the panel and gives the preview the whole screen, still
+letterboxed to the export aspect — so a portrait phone wallpaper previews
+edge-to-edge on a phone. It requests native fullscreen where that exists and
+falls back to a full-viewport overlay where it doesn't (iPhone Safari has no
+`requestFullscreen` on elements). The toolbar fades while idle and returns on
+any pointer activity.
 
 ## Layout
 

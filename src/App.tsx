@@ -35,7 +35,9 @@ function initialParams(): Params {
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<LiquidRenderer | null>(null);
+  const hideTimer = useRef<number | undefined>(undefined);
 
   const [fatal, setFatal] = useState<string | null>(null);
   const [params, setParams] = useState<Params>(initialParams);
@@ -48,16 +50,20 @@ export default function App() {
   const [displaySize, setDisplaySize] = useState({ w: 640, h: 360 });
   const [toast, setToast] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
+  const [immersive, setImmersive] = useState(false);
+  const [controlsShown, setControlsShown] = useState(true);
 
   // Live values the render loop reads without re-subscribing every frame.
   const paramsRef = useRef(params);
   const playingRef = useRef(playing);
+  const immersiveRef = useRef(immersive);
   const timeRef = useRef(params.phase);
   const dirtyRef = useRef(true);
   const undoRef = useRef<Params[]>([]);
 
   paramsRef.current = params;
   playingRef.current = playing;
+  immersiveRef.current = immersive;
 
   // ------------------------------------------------------------ renderer --
 
@@ -266,6 +272,63 @@ export default function App() {
     });
   }, []);
 
+  // ------------------------------------------------------------ immersive --
+
+  /**
+   * Native fullscreen where it exists, with the CSS overlay always applied.
+   *
+   * iPhone Safari has no Element.requestFullscreen, so relying on the API alone
+   * would leave the feature dead there. The overlay alone still fills the
+   * viewport and hides the panel, which is most of the value.
+   */
+  const enterImmersive = useCallback(() => {
+    setImmersive(true);
+    const el = stageRef.current;
+    if (el?.requestFullscreen) {
+      el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+        /* overlay carries it */
+      });
+    }
+  }, []);
+
+  const exitImmersive = useCallback(() => {
+    setImmersive(false);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }, []);
+
+  const toggleImmersive = useCallback(() => {
+    if (immersiveRef.current) exitImmersive();
+    else enterImmersive();
+  }, [enterImmersive, exitImmersive]);
+
+  // Escape and the browser's own fullscreen control bypass our buttons, so
+  // mirror whatever the browser decided back into component state.
+  useEffect(() => {
+    const sync = () => {
+      if (!document.fullscreenElement) setImmersive(false);
+    };
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  // Fade the toolbar out while idle. Any pointer activity brings it back, so a
+  // touch device is never left without a way out.
+  const nudgeControls = useCallback(() => {
+    setControlsShown(true);
+    window.clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => setControlsShown(false), 2600);
+  }, []);
+
+  useEffect(() => {
+    if (!immersive) {
+      window.clearTimeout(hideTimer.current);
+      setControlsShown(true);
+      return;
+    }
+    nudgeControls();
+    return () => window.clearTimeout(hideTimer.current);
+  }, [immersive, nudgeControls]);
+
   // ----------------------------------------------------------- shortcuts --
 
   useEffect(() => {
@@ -290,11 +353,18 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'e') {
         e.preventDefault();
         openExport();
+      } else if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        toggleImmersive();
+      } else if (e.key === 'Escape' && immersiveRef.current) {
+        // Only reached when there is no native fullscreen to escape from;
+        // otherwise the browser handles Escape and fullscreenchange syncs us.
+        exitImmersive();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, togglePlay, pushUndo, openExport]);
+  }, [undo, togglePlay, pushUndo, openExport, toggleImmersive, exitImmersive]);
 
   // ---------------------------------------------------------------- view --
 
@@ -311,7 +381,12 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="stage">
+      <div
+        className={`stage${immersive ? ' immersive' : ''}`}
+        ref={stageRef}
+        onPointerMove={immersive ? nudgeControls : undefined}
+        onPointerDown={immersive ? nudgeControls : undefined}
+      >
         <div className="canvas-wrap" ref={wrapRef}>
           <div
             className="canvas-frame"
@@ -321,7 +396,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="stage-bar">
+        <div className={`stage-bar${immersive && !controlsShown ? ' hidden' : ''}`}>
           <button className="btn" onClick={togglePlay} title="Play / pause (Space)">
             {playing ? '❚❚ Pause' : '▶ Play'}
           </button>
@@ -380,6 +455,13 @@ export default function App() {
             {output.width}×{output.height} · {fps} fps
           </span>
 
+          <button
+            className="btn"
+            onClick={toggleImmersive}
+            title={immersive ? 'Exit fullscreen (F or Esc)' : 'Fullscreen preview (F)'}
+          >
+            {immersive ? '⤡ Exit' : '⛶ Fullscreen'}
+          </button>
           <button className="btn" onClick={copyLink} title="Copy a link that restores this look">
             ⧉ Link
           </button>

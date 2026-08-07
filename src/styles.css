@@ -255,6 +255,13 @@ input[type='range'] {
   background: transparent;
   cursor: ew-resize;
   display: block;
+
+  /* Hand vertical gestures back to the browser so scrolling the panel on a
+     touch device doesn't nudge whichever slider the finger happened to land
+     on. A range input otherwise claims the whole gesture, and a swipe that is
+     a few pixels off vertical changes the value. Horizontal drags are not in
+     the allowed set, so those still reach the slider. */
+  touch-action: pan-y;
 }
 
 input[type='range']::-webkit-slider-runnable-track {

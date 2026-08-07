@@ -1,5 +1,6 @@
 import { createProgram, hexToRgb, resolveIncludes, UniformCache } from './glutil';
 import { PARAM_LIST, type Params } from '../params/schema';
+import { bakeGradient, RAMP_WIDTH } from '../params/gradient';
 
 import quadVert from './shaders/quad.vert?raw';
 import commonGlsl from './shaders/common.glsl?raw';
@@ -38,6 +39,8 @@ export class LiquidRenderer {
   private liquidUniforms: UniformCache;
   private resolveUniforms: UniformCache;
   private vao: WebGLVertexArrayObject;
+  private rampTex: WebGLTexture;
+  private rampSpec: string | null = null;
   private disposed = false;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -76,13 +79,25 @@ export class LiquidRenderer {
     if (!vao) throw new RendererError('Failed to create vertex array');
     this.vao = vao;
     gl.bindVertexArray(vao);
+
+    // Colour ramp lookup. LINEAR so the 256 stops read as a smooth gradient.
+    const ramp = gl.createTexture();
+    if (!ramp) throw new RendererError('Failed to create the gradient texture');
+    this.rampTex = ramp;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, ramp);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, RAMP_WIDTH, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
   // ------------------------------------------------------------- uniforms --
 
   private uploadParams(u: UniformCache, params: Params, time: number, dither: boolean) {
     for (const def of PARAM_LIST) {
-      if (!def.uniform) continue; // app-side only (phase, loopSeconds)
+      if (!def.uniform) continue; // app-side only (phase, loopSeconds, gradient)
       const value = params[def.key as keyof Params];
       if (def.kind === 'color') {
         const [r, g, b] = hexToRgb(value as string);
@@ -93,6 +108,25 @@ export class LiquidRenderer {
     }
     u.f('uTime', time);
     u.f('uDither', dither ? 1 : 0);
+  }
+
+  /**
+   * Uploads the colour ramp on unit 1 and binds it. Cached on the spec string:
+   * rasterising through canvas 2D on every frame would be wasteful, and the
+   * ramp only changes when the user edits it.
+   */
+  private bindRamp(spec: string) {
+    const gl = this.gl;
+    if (spec !== this.rampSpec) {
+      const data = bakeGradient(spec);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.rampTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, RAMP_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, data.data);
+      this.rampSpec = spec;
+    }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.rampTex);
+    this.liquidUniforms.i('uRamp', 1);
   }
 
   /**
@@ -116,6 +150,7 @@ export class LiquidRenderer {
     gl.bindVertexArray(this.vao);
     gl.viewport(0, 0, width, height);
     this.uploadParams(this.liquidUniforms, params, time, dither);
+    this.bindRamp(params.gradient);
     this.liquidUniforms.v2('uResolution', width, height);
 
     const rows = Math.max(1, Math.floor(PIXELS_PER_CHUNK / Math.max(width, 1)));
@@ -167,6 +202,7 @@ export class LiquidRenderer {
     gl.disable(gl.SCISSOR_TEST);
     gl.viewport(0, 0, width, height);
     this.uploadParams(this.liquidUniforms, params, time, true);
+    this.bindRamp(params.gradient);
     this.liquidUniforms.v2('uResolution', width, height);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -281,6 +317,7 @@ export class LiquidRenderer {
       gl.disable(gl.SCISSOR_TEST);
       gl.viewport(0, 0, width * factor, height * factor);
       this.uploadParams(this.liquidUniforms, params, time, factor === 1);
+      this.bindRamp(params.gradient);
       this.liquidUniforms.v2('uResolution', width * factor, height * factor);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -400,6 +437,7 @@ export class LiquidRenderer {
     gl.deleteProgram(this.liquidProgram);
     gl.deleteProgram(this.resolveProgram);
     gl.deleteVertexArray(this.vao);
+    gl.deleteTexture(this.rampTex);
     // Deliberately no WEBGL_lose_context here. A canvas hands out the same
     // context object forever, so killing it would leave a StrictMode remount
     // (or any future re-init on this canvas) holding a dead context.

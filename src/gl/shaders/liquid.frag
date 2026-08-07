@@ -53,9 +53,8 @@ uniform float uEnvContrast;
 uniform float uAmbient;
 
 // color
-uniform float uPalette;     // 0 = mono, 1 = duotone, 2 = iridescent
-uniform vec3  uColorA;
-uniform vec3  uColorB;
+uniform float uColorMode;   // 0 = ramp, 1 = direct
+uniform sampler2D uRamp;    // 256x1 luminance -> colour lookup
 uniform float uIriAmount;
 uniform float uIriFreq;
 uniform float uHueShift;    // degrees
@@ -320,13 +319,11 @@ void main() {
   vec3 col = uMaterial < 0.5 ? shadeMetal(N, V, h) : shadeGlass(N, V, h);
 
   // ---- palette ----
-  if (uPalette < 0.5) {
-    col = vec3(luma(col));
-  } else if (uPalette < 1.5) {
+  if (uColorMode < 0.5) {
     float l = luma(col);
-    // Ramp between the two colours, then add the over-1.0 headroom back so
-    // blown-out speculars stay blown out instead of clamping to colour A.
-    col = mix(uColorB, uColorA, clamp(l, 0.0, 1.0)) + max(l - 1.0, 0.0);
+    // Map brightness through the ramp, then add the over-1.0 headroom back so
+    // blown-out speculars stay blown out instead of clamping to the ramp's end.
+    col = texture(uRamp, vec2(clamp(l, 0.0, 1.0), 0.5)).rgb + max(l - 1.0, 0.0);
   }
 
   // ---- grade ----
@@ -339,7 +336,9 @@ void main() {
   if (abs(uSaturation - 1.0) > 0.001) {
     col = mix(vec3(luma(col)), col, uSaturation);
   }
-  if (abs(uHueShift) > 0.001 && uPalette > 1.5) {
+  // Only meaningful in Direct mode; in Ramp mode the gradient already decides
+  // the hue and rotating it afterwards would fight the editor.
+  if (abs(uHueShift) > 0.001 && uColorMode > 0.5) {
     col = hueRotation(radians(uHueShift)) * col;
   }
 

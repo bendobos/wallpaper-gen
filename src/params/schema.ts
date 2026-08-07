@@ -49,7 +49,13 @@ export interface ColorDef extends Base {
   readonly default: string;
 }
 
-export type ParamDef = SliderDef | SelectDef | ColorDef;
+/** Multi-stop colour ramp, serialised as `pos:hex,…`. See params/gradient.ts. */
+export interface GradientDef extends Base {
+  readonly kind: 'gradient';
+  readonly default: string;
+}
+
+export type ParamDef = SliderDef | SelectDef | ColorDef | GradientDef;
 
 export const PARAM_SCHEMA = [
   // ------------------------------------------------------------ composition
@@ -152,12 +158,11 @@ export const PARAM_SCHEMA = [
     min: 0, max: 1, step: 0.005, default: 0.03, random: [0, 0.15] },
 
   // ------------------------------------------------------------------ color
-  { kind: 'select', key: 'palette', label: 'Palette', group: 'Color', uniform: 'uPalette',
-    options: ['Mono', 'Duotone', 'Full Color'], default: 0, random: [0, 2] },
-  { kind: 'color', key: 'colorA', label: 'Color A', group: 'Color', uniform: 'uColorA',
-    default: '#ffffff' },
-  { kind: 'color', key: 'colorB', label: 'Color B', group: 'Color', uniform: 'uColorB',
-    default: '#0a0a12' },
+  { kind: 'select', key: 'colorMode', label: 'Color Mode', group: 'Color', uniform: 'uColorMode',
+    options: ['Ramp', 'Direct'], default: 0,
+    hint: 'Ramp maps brightness through the gradient below. Direct keeps the shaded colour, which is what iridescence needs.' },
+  { kind: 'gradient', key: 'gradient', label: 'Gradient', group: 'Color', default: '0:000000,1:ffffff',
+    hint: 'Maps image brightness to colour. Click the bar to add a stop, drag to move, double-click to remove.' },
   { kind: 'slider', key: 'iriAmount', label: 'Iridescence', group: 'Color', uniform: 'uIriAmount',
     min: 0, max: 1, step: 0.01, default: 0, random: [0, 0.9] },
   { kind: 'slider', key: 'iriFreq', label: 'Iridescence Freq', group: 'Color', uniform: 'uIriFreq',
@@ -196,9 +201,9 @@ export type ParamKey = Schema['key'];
  */
 export const PARAM_LIST: readonly ParamDef[] = PARAM_SCHEMA;
 
-/** Colour params are hex strings; everything else is a number. */
+/** Colour and gradient params are strings; everything else is a number. */
 export type Params = {
-  [D in Schema as D['key']]: D extends { kind: 'color' } ? string : number;
+  [D in Schema as D['key']]: D extends { kind: 'color' | 'gradient' } ? string : number;
 };
 
 export const DEFAULTS: Params = Object.fromEntries(

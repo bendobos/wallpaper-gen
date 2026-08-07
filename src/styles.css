@@ -657,6 +657,53 @@ input[type='color']::-webkit-color-swatch {
   transition: width 0.1s linear;
 }
 
+/* -------------------------------------------------------------- gradient */
+
+.gradient-bar {
+  position: relative;
+  height: 26px;
+  margin: 4px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: copy;
+  /* Vertical scrolling past the editor keeps working. */
+  touch-action: pan-y;
+}
+
+.gradient-stop {
+  position: absolute;
+  top: 100%;
+  width: 11px;
+  height: 11px;
+  margin: 2px 0 0 -6px;
+  border: 1px solid #000;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--text-faint);
+  cursor: ew-resize;
+  /* The handle owns the whole gesture — a drag must not scroll the panel. */
+  touch-action: none;
+}
+
+.gradient-stop.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.gradient-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gradient-controls .spacer {
+  flex: 1;
+}
+
+select.ramp-preset {
+  width: auto;
+  font-size: 11px;
+  padding: 1px 4px;
+}
+
 /* ------------------------------------------------------------ variations */
 
 .variations {

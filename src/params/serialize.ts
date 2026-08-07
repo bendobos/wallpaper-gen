@@ -6,6 +6,7 @@ import {
   type ParamKey,
   type Params,
 } from './schema';
+import { isValidGradient, MONO_RAMP } from './gradient';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -21,6 +22,8 @@ export function sanitize(raw: unknown): Params {
 
     if (def.kind === 'color') {
       if (typeof v === 'string' && HEX.test(v.trim())) out[def.key] = v.trim().toLowerCase();
+    } else if (def.kind === 'gradient') {
+      if (typeof v === 'string' && isValidGradient(v.trim())) out[def.key] = v.trim().toLowerCase();
     } else if (def.kind === 'select') {
       const n = Number(v);
       if (Number.isFinite(n)) out[def.key] = Math.min(def.options.length - 1, Math.max(0, Math.round(n)));
@@ -29,7 +32,37 @@ export function sanitize(raw: unknown): Params {
       if (Number.isFinite(n)) out[def.key] = Math.min(def.max, Math.max(def.min, n));
     }
   }
+
+  migrateLegacyPalette(src, out);
   return out as Params;
+}
+
+/**
+ * Converts the pre-gradient `palette` + `colorA` + `colorB` triple into the
+ * equivalent ramp, so links and saved presets from before the gradient editor
+ * still load looking the way they did.
+ *
+ * Only applies when the input has no gradient of its own — a current payload
+ * always wins.
+ */
+function migrateLegacyPalette(src: Record<string, unknown>, out: Record<string, number | string>) {
+  if (src.palette === undefined) return;
+  if (typeof src.gradient === 'string' && isValidGradient(src.gradient)) return;
+
+  const hex = (v: unknown, fallback: string) =>
+    typeof v === 'string' && HEX.test(v.trim()) ? v.trim().slice(1).toLowerCase() : fallback;
+
+  const palette = Number(src.palette);
+  if (palette === 2) {
+    // "Full Color" kept the shaded colour untouched — that is Direct mode now.
+    out.colorMode = 1;
+  } else if (palette === 1) {
+    out.colorMode = 0;
+    out.gradient = `0:${hex(src.colorB, '0a0a12')},1:${hex(src.colorA, 'ffffff')}`;
+  } else {
+    out.colorMode = 0;
+    out.gradient = MONO_RAMP;
+  }
 }
 
 /** Only the values that differ from the defaults, so URLs stay short. */
@@ -88,7 +121,7 @@ type Explorable = Extract<ParamDef, { kind: 'slider' | 'select' }> & {
  */
 function explorable(): Explorable[] {
   return PARAM_LIST.filter(
-    (d): d is Explorable => d.kind !== 'color' && !!d.random,
+    (d): d is Explorable => (d.kind === 'slider' || d.kind === 'select') && !!d.random,
   );
 }
 

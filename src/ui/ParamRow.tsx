@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ParamDef } from '../params/schema';
 import { useSliderGate } from './useSliderGate';
+import GradientEditor from './GradientEditor';
 
 interface Props {
   def: ParamDef;
@@ -22,6 +23,16 @@ function decimalsFor(step: number): number {
  */
 export default function ParamRow({ def, value, onChange, onCommitStart }: Props) {
   const modified = value !== def.default;
+
+  if (def.kind === 'gradient') {
+    return (
+      <GradientEditor
+        value={String(value)}
+        onChange={onChange}
+        onCommitStart={onCommitStart}
+      />
+    );
+  }
 
   if (def.kind === 'color') {
     return (

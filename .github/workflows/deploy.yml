@@ -29,7 +29,7 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npx tsc -b --noEmit
+      # `npm run build` is `tsc -b && vite build`, so typechecking is covered.
       - run: npm run build
 
       - uses: actions/configure-pages@v5

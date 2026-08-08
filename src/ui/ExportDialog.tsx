@@ -64,7 +64,9 @@ export default function ExportDialog({
 
   const activeSsaa = tab === 'image' ? ssaa : videoSsaa;
   const tooBig = size.width > max || size.height > max;
-  const effectiveSsaa = tooBig ? 1 : renderer.clampSsaa(size.width, size.height, activeSsaa);
+  const usesPost = renderer.usesPostChain(params);
+  const plan = renderer.planSsaa(size.width, size.height, activeSsaa, usesPost);
+  const effectiveSsaa = tooBig ? 1 : plan.factor;
   const megapixels = (size.width * size.height) / 1e6;
 
   const even = evenSize(size.width, size.height);
@@ -421,7 +423,15 @@ export default function ExportDialog({
             </p>
           )}
 
-          {!tooBig && effectiveSsaa < activeSsaa && (
+          {!tooBig && effectiveSsaa < activeSsaa && plan.limit === 'memory' && (
+            <p className="note warn">
+              Supersampling reduced to {effectiveSsaa}× — bloom and depth of field render into a
+              16-bit float buffer, and {activeSsaa}× at {size.width}×{size.height} would need over
+              a gigabyte of it. Setting Bloom and Depth of Field to zero restores {activeSsaa}×.
+            </p>
+          )}
+
+          {!tooBig && effectiveSsaa < activeSsaa && plan.limit === 'size' && (
             <p className="note warn">
               Supersampling reduced to {effectiveSsaa}× — {activeSsaa}× would need a{' '}
               {size.width * activeSsaa}×{size.height * activeSsaa} buffer, past this GPU's {max} px

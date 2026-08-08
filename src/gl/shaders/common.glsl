@@ -60,6 +60,25 @@ vec3 cosPalette(float t, vec3 phase) {
   return 0.5 + 0.5 * cos(TAU * (t + phase));
 }
 
+/**
+ * Soft-knee highlight isolation, used by the bloom and streak passes.
+ *
+ * Thresholding *after* a blur is normally a mistake — it loses thin bright
+ * features, whose blurred average falls back under the threshold. It works here
+ * because the chain is built from genuine HDR: a one-pixel specular filament at
+ * 8.0 still averages well past a threshold of 0.8 after a halving, and thin
+ * bright filaments are most of what these images contain. That is what lets one
+ * blur chain serve bloom, streaks and depth of field instead of three.
+ */
+vec3 softThreshold(vec3 c, float t) {
+  const float knee = 0.5;
+  float l = max(max(c.r, c.g), c.b);
+  float soft = clamp(l - t + knee, 0.0, 2.0 * knee);
+  soft = soft * soft / (4.0 * knee);
+  float w = max(soft, l - t) / max(l, 1e-4);
+  return c * w;
+}
+
 mat3 hueRotation(float a) {
   float c = cos(a), s = sin(a);
   float o = 1.0 / 3.0;

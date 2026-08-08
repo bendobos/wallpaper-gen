@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BY_GROUP, type Group, type ParamKey, type Params } from '../params/schema';
 import ParamRow from './ParamRow';
 
@@ -6,11 +6,17 @@ interface Props {
   params: Params;
   onChange: (key: ParamKey, value: number | string) => void;
   onCommitStart: () => void;
+  /**
+   * Extra rows appended to a group's body. For the handful of controls that are
+   * not a single serialisable value — a file picker, a capability warning —
+   * which have no business being invented as a schema kind apiece.
+   */
+  extras?: Partial<Record<Group, ReactNode>>;
 }
 
 const INITIALLY_OPEN: readonly Group[] = ['Flow', 'Material'];
 
-export default function ControlPanel({ params, onChange, onCommitStart }: Props) {
+export default function ControlPanel({ params, onChange, onCommitStart, extras }: Props) {
   const [open, setOpen] = useState<Set<Group>>(() => new Set(INITIALLY_OPEN));
 
   const toggle = (g: Group) =>
@@ -52,6 +58,7 @@ export default function ControlPanel({ params, onChange, onCommitStart }: Props)
                     onCommitStart={onCommitStart}
                   />
                 ))}
+                {extras?.[group]}
               </div>
             )}
           </section>

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LiquidRenderer } from './gl/renderer';
-import { DEFAULTS, type ParamKey, type Params } from './params/schema';
+import { DEFAULTS, type Group, type ParamKey, type Params } from './params/schema';
 import { BUILTIN_PRESETS } from './params/presets';
+import { bakeMatcap, ENV_CUSTOM, ENV_PROCEDURAL } from './params/matcaps';
 import {
   decodeParams,
   encodeParams,
@@ -18,6 +19,7 @@ import PresetBar from './ui/PresetBar';
 import ExportDialog from './ui/ExportDialog';
 import LoopSpeed from './ui/LoopSpeed';
 import VariationsGrid from './ui/VariationsGrid';
+import MatcapUpload from './ui/MatcapUpload';
 
 const MAX_UNDO = 60;
 
@@ -55,6 +57,13 @@ export default function App() {
   const [fps, setFps] = useState(0);
   const [immersive, setImmersive] = useState(false);
   const [controlsShown, setControlsShown] = useState(true);
+  const [postSupported, setPostSupported] = useState(true);
+  // Deliberately not persisted and not serialised: an uploaded image has no
+  // representation in the URL hash, and pretending otherwise in localStorage
+  // would make the limitation surface as a bug on the next visit instead.
+  const [customMatcap, setCustomMatcap] = useState<{ name: string; levels: ImageData[] } | null>(
+    null,
+  );
 
   // Live values the render loop reads without re-subscribing every frame.
   const paramsRef = useRef(params);
@@ -74,7 +83,9 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     try {
-      rendererRef.current = new LiquidRenderer(canvas);
+      const r = new LiquidRenderer(canvas);
+      rendererRef.current = r;
+      setPostSupported(r.postSupported);
     } catch (e) {
       setFatal(e instanceof Error ? e.message : String(e));
       return;
@@ -131,6 +142,21 @@ export default function App() {
     r.resize(displaySize.w * dpr * quality, displaySize.h * dpr * quality);
     dirtyRef.current = true;
   }, [displaySize, quality]);
+
+  // ------------------------------------------------------------- matcap --
+
+  // Baking is a couple of milliseconds of canvas 2D, so it happens on selection
+  // rather than at startup and there is no loading state to manage. Clearing
+  // the texture is what makes the renderer fall back to the procedural
+  // environment, which is how a link carrying a custom matcap degrades.
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (!r) return;
+    const mode = params.envMode;
+    if (mode === ENV_PROCEDURAL) return; // texture unused; leave whatever is there
+    r.setMatcap(mode === ENV_CUSTOM ? (customMatcap?.levels ?? null) : bakeMatcap(mode));
+    dirtyRef.current = true;
+  }, [params.envMode, customMatcap]);
 
   // --------------------------------------------------------- render loop --
 
@@ -277,6 +303,28 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // Rows that belong inside a control group but are not a single serialisable
+  // value, so they are not in the schema.
+  const panelExtras = useMemo<Partial<Record<Group, React.ReactNode>>>(
+    () => ({
+      Lighting:
+        params.envMode === ENV_CUSTOM ? (
+          <MatcapUpload
+            loaded={customMatcap?.name ?? null}
+            onLoad={(name, levels) => setCustomMatcap({ name, levels })}
+            onClear={() => setCustomMatcap(null)}
+          />
+        ) : null,
+      Lens: postSupported ? null : (
+        <p className="note warn">
+          Bloom and depth of field need a float render target, which this browser's WebGL2 does
+          not offer (no <code>EXT_color_buffer_float</code>). Both are ignored here.
+        </p>
+      ),
+    }),
+    [params.envMode, customMatcap, postSupported],
+  );
 
   // ------------------------------------------------------------ immersive --
 
@@ -506,7 +554,12 @@ export default function App() {
             onSave={savePreset}
             onDelete={deletePreset}
           />
-          <ControlPanel params={params} onChange={setParam} onCommitStart={pushUndo} />
+          <ControlPanel
+            params={params}
+            onChange={setParam}
+            onCommitStart={pushUndo}
+            extras={panelExtras}
+          />
         </div>
       </aside>
 

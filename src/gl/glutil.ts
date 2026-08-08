@@ -33,14 +33,30 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string, label: s
   return shader;
 }
 
+/**
+ * Injects `#define`s directly after the `#version` line, which GLSL requires to
+ * be first.
+ *
+ * Returns the source untouched when there are none. That matters more than it
+ * looks: the no-feature variant has to be *textually* today's shader, because
+ * merely adding an unreachable call to a big function is enough to make the
+ * driver re-associate floating point elsewhere and shift the output by a level.
+ */
+function withDefines(src: string, defines: readonly string[]): string {
+  if (!defines.length) return src;
+  const block = defines.map((d) => `#define ${d} 1`).join('\n');
+  return src.replace(/^(#version[^\n]*\n)/, `$1${block}\n`);
+}
+
 export function createProgram(
   gl: WebGL2RenderingContext,
   vertSrc: string,
   fragSrc: string,
   label: string,
+  defines: readonly string[] = [],
 ): WebGLProgram {
   const vert = compile(gl, gl.VERTEX_SHADER, vertSrc, `${label}.vert`);
-  const frag = compile(gl, gl.FRAGMENT_SHADER, fragSrc, `${label}.frag`);
+  const frag = compile(gl, gl.FRAGMENT_SHADER, withDefines(fragSrc, defines), `${label}.frag`);
 
   const program = gl.createProgram();
   if (!program) throw new Error('Failed to create program');

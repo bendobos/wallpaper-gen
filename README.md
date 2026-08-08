@@ -24,9 +24,10 @@ The pipeline, in [`src/gl/shaders/liquid.frag`](src/gl/shaders/liquid.frag):
 2. **Domain warp** — the field is folded into itself 1–4 times. This is the
    control that turns noise into poured-liquid topology.
 3. **Ridge & crease** — folds and sharpens the field into hard creases.
-4. **Normals** — finite differences, at a fixed *world-space* epsilon.
-5. **Environment** — a procedural studio: horizon gradient plus horizontal
-   softbox strips, antialiased analytically.
+4. **Normals** — finite differences, at a fixed *world-space* epsilon, plus an
+   optional cavity term from the field's concavity.
+5. **Environment** — a procedural studio (horizon gradient plus horizontal
+   softbox strips, antialiased analytically), or a matcap.
 6. **Material** — *Metal* reflects the environment; *Glass* refracts it with a
    per-channel IOR for chromatic dispersion, plus a slope-driven reflective rim.
 7. **Grade** — exposure, contrast, black crush, vignette, grain, a highlight
@@ -34,6 +35,10 @@ The pipeline, in [`src/gl/shaders/liquid.frag`](src/gl/shaders/liquid.frag):
 
 The five built-in presets are nothing but parameter sets — no special-case code
 sits behind any of them.
+
+Bloom and depth of field are the one exception to "one shader, one pass": above
+zero they insert an offscreen HDR chain between steps 6 and 7. See
+[Bloom and depth of field](#bloom-and-depth-of-field).
 
 ### Resolution independence
 
@@ -56,10 +61,226 @@ you see is the framing you get.
 | **Thickness** (Glass) | Darkens the interior. Dispersion fringes only read against a dark interior. |
 | **Softbox Count** / **Roughness** | Dispersion needs a finely structured environment; a smooth gradient produces no colour separation. |
 | **Black Level** | How the high-contrast filament look gets its large black field. |
+| **Environment** | The single biggest change to *what* is being reflected, rather than to the shape reflecting it. |
+| **Cavity** | The only thing here that darkens rather than lights. Creases stop reading as painted-on. |
+| **Bloom Threshold** | Reflective surfaces run well past 1.0, so values above 1 still leave plenty glowing. |
+| **Focus Height** | The height field sits near 0.5; setting this near either end puts nothing in focus. |
 
 Every parameter is defined once in [`src/params/schema.ts`](src/params/schema.ts),
 which drives both the control panel and the uniform upload — adding a slider is
 a one-line change.
+
+## Shader variants
+
+Optional shader features are `#ifdef`-ed out and the liquid shader is compiled
+once per feature set, lazily, keyed on the defines.
+
+This is not premature optimisation — it is the only way the guarantee below
+holds. A runtime `if` is not enough: adding an *unreachable* call to `heightAt`
+was measured to shift output by one 8-bit level on 0.28% of subpixels, because
+the driver schedules the reachable calls differently once the function has more
+callers. `#ifdef` removes the code entirely, so the no-feature variant is
+textually the shader that has always run.
+
+The cost is one compile the first time a feature is switched on: ~6 ms warm,
+up to ~1 s the very first time on a machine, after which the driver's own shader
+cache takes over. Nobody pays for a feature they never enable.
+
+## Cavity
+
+Nothing in this generator was ever shadowed — every surface only got brighter or
+dimmer *by reflection* — which is the main reason a heavily crumpled surface
+still read as flat. **Cavity** darkens concave regions.
+
+It compares a point's height against the mean of a ring around it: higher
+neighbours mean a crease. Three samples at 120°, not four on the axes, because
+that is the cheapest arrangement whose first-order terms cancel exactly (three
+unit vectors at 120° sum to zero) while the second-order term stays isotropic —
+a two-sample version would miss every crease running parallel to its axis.
+
+The ring radius is a quarter of a feature, far wider than the normal's epsilon.
+That is not a stylistic choice: the height difference this measures scales with
+the *square* of the radius, so a ring at the normal's 0.0015 world units reports
+a few parts in 100000, which is mostly floating-point cancellation noise with no
+usable threshold above it. The first attempt used a narrow ring and produced a
+control that did nothing at any setting.
+
+Occlusion scales the environment reflection and the ambient fill, never the rim
+— the rim is a slope term whose whole job is to light creases up.
+
+Measured cost at 4K: 56 ms → 59 ms, about +5%. The plan predicted +100% for the
+three extra height-field evaluations; the driver schedules them far better than
+that.
+
+## Brushed metal
+
+**Brushed** squashes the Micro Detail noise into parallel striations, so a
+highlight crossing them smears out instead of pooling. It shapes that noise
+rather than adding its own, so Micro Detail has to be above zero.
+
+Both axes are scaled, by `s` and `1/s`, rather than one of them alone. Scaling a
+single axis raises the peak frequency with it, and the striations alias into
+speckle long before they are fine enough to read as a grain — which is exactly
+what the first version did. Keeping the geometric-mean frequency fixed makes
+Brushed change the character of the perturbation without changing how much of it
+lands above Nyquist.
+
+The gradient is transformed back to world axes afterwards (scale, then the
+transposed rotation). Skip that and the striations are *drawn* in one direction
+but *perturb* in another, and the highlight never stretches at all.
+
+One thing that looks like a bug and is not: at 90° over the procedural
+environment the grain nearly vanishes. Measured across the frame, the striations
+are there and correctly oriented — contrast across x of 28.2 against 1.2 across
+y — but the procedural environment varies only with height, so a vertical grain
+has no structure to sweep. It shows against a matcap with horizontal structure.
+
+## Environments
+
+The procedural studio varies only with the reflected direction's *height*, which
+is why every metal look built on it is a relative of every other one — there is
+simply not much to reflect. **Environment** switches that for a **matcap**: a
+painted lit sphere, indexed by the view-space normal, which can have structure
+and colour in two dimensions.
+
+Four are built in — Studio, Sunset, Neon City, Soft Tent — and they are
+*generated*, not shipped: [`src/params/matcaps.ts`](src/params/matcaps.ts) paints
+each one with canvas 2D on selection and caches it. That costs a couple of
+milliseconds and zero bundle bytes, against ~40 KB an asset for images that only
+ever appear smeared across a warped surface.
+
+Two details make them work:
+
+- The image is stored in display range, and 8 bits cannot hold a specular. The
+  shader cubes it and scales by 3, restoring a range comparable to the
+  procedural environment's — deep falloff, cores well past 1.0. The matcaps are
+  painted to suit that curve, with additive light sources whose cores clip.
+- A near-flat surface only reflects directions close to straight ahead, so it
+  only ever samples the middle of the disc. The shader scales the direction by
+  1.1 before mapping it, which puts the rim of the matcap at exactly the slope
+  `slopeTerm()` already treats as the steepest the height field produces.
+  Without it, low Relief would sample a coin-sized patch and every matcap would
+  read as one flat colour. It is also why the built-ins keep their interesting
+  content near the centre.
+
+The key light stays live over a matcap — the image brings soft sources but no
+directional key. **Env Contrast** has no strips to widen in this mode, so it
+becomes a gamma on the image instead, normalised to be neutral at its own
+default. **Softbox Count** stays procedural-only and its hint says so.
+
+**Roughness** picks a mip level. The chain is pre-blurred on the CPU rather than
+left to `generateMipmap`, and band-limited at full resolution *before*
+downscaling — `ctx.filter` applies in destination space, so blurring as part of
+the downscale only softens aliasing that has already happened and leaves the
+small levels blocky, which Roughness then magnifies back to full frame. Each
+level is drawn overscanned by ~3σ so the blur has colour to pull from beyond the
+frame instead of transparent black, which would darken the rim the steepest
+slopes reflect.
+
+Expect this to look weaker than it is on a high-frequency surface. Roughness
+blurs what is *reflected*, but most of the apparent sharpness in these images
+comes from the normals sweeping the environment, and blurring an environment
+cannot blur geometry. On a smooth surface the response is clean and monotonic
+(local detail 2.46 → 0.51 across the range); on a crumpled one it mostly shows
+at the top of the slider, where the matcap collapses toward a single colour.
+
+**Custom** takes any image (a real matcap, or a photo, loosely) and scales it to
+256×256. Its limitation is real and stated in the panel: **a custom matcap
+cannot travel in a share link.** Built-ins serialise by id; an uploaded image
+has nowhere to go in a URL hash, so a link made with one falls back to the
+procedural environment. The renderer enforces that in one place, so the preview,
+thumbnails, stills and video all degrade identically.
+
+## Bloom and depth of field
+
+Both default to zero, and at zero **the renderer does not change at all** — the
+single direct pass still runs, and every image this app has ever produced still
+comes out byte-identical. Above zero, either one routes the frame through:
+
+```
+liquid.frag     → RGBA16F scene, HDR, circle of confusion in alpha
+downsample.frag ×3 → ½, ¼, ⅛ blur chain (13-tap)
+blur.frag       ×2 → directional smear of the ⅛ level, for streaks
+post.frag       → scene + bloom + streak + DoF + lens, then the grade, to 8-bit
+```
+
+The grade itself lives in [`grade.glsl`](src/gl/shaders/grade.glsl) and is
+included by *both* shaders, so there is exactly one copy of it and the two paths
+cannot drift apart.
+
+### Why one chain serves both
+
+Thresholding *after* a blur normally loses thin bright features, because their
+blurred average falls back under the threshold — which is why bloom usually gets
+a chain of its own. It works here because the chain is built from genuine HDR: a
+one-pixel specular filament at 8.0 still averages well past a threshold of 0.8
+after halving, and thin bright filaments are most of what these images contain.
+So bloom sums a soft-knee threshold of the three levels, and depth of field
+walks up the same three as the circle of confusion grows.
+
+### Depth from height
+
+There is no depth buffer, so **surface height is the depth**. That is not a
+compromise so much as the more useful control: Focus Height picks a height to
+keep sharp — 0 the troughs, 1 the crests — and everything away from it softens.
+Focusing a plane would mean focusing something nothing in the image lies on.
+
+Note that the height field is centred near 0.5 by the crease sigmoid, so a Focus
+Height near either end puts nothing in focus and simply blurs the frame.
+
+## Lens
+
+Four optical effects sharing the chain bloom already builds. Any of them above
+zero engages it; all at rest and the direct pass runs untouched.
+
+- **Chromatic aberration** reads the three channels at slightly different radii.
+  Measured: red-minus-blue at the frame edge goes 0 → 49 while the centre stays
+  at 2, which is the behaviour a real lens has and a uniform tint does not.
+- **Lens distortion** remaps the scene fetch radially, aspect-corrected so it
+  stays circular on a phone frame. The grade is deliberately left anchored to
+  the frame — a vignette that bulged with the image would read as a mistake.
+  Barrel pulls the corners in from outside the scene target, where
+  `CLAMP_TO_EDGE` smears the border pixel; that is why the slider stops at 0.4.
+- **Anamorphic streak** smears highlights along one axis, from the smallest
+  chain level through two passes of `blur.frag` into a ping-pong pair.
+- **Glow Tint** colours bloom and streak together. Warm gives halation, cool
+  gives the anamorphic blue — one control instead of two systems.
+
+### Two things the streak got wrong first
+
+The two blur passes use tap spacings differing by exactly 9×, so the second
+steps past the first's whole nine-tap span and the first fills the gaps the
+second would otherwise leave as discrete blobs.
+
+The reach was originally expressed in *texels of the ⅛ chain level*. That is a
+resolution-dependence bug of exactly the kind the world-space epsilon in
+`liquid.frag` exists to avoid: the level scales with the render, so an 8K export
+would have come out with a streak an eighth as long as its own preview. It is a
+fraction of frame height now, and holds to within 17% across a 4× change of
+render size.
+
+The first working version then reached 56% of the frame per side, which is not a
+streak but a full-frame average — it measured as a flat haze with no direction
+at all. 22% is the setting that reads as a lens.
+
+### Memory
+
+An RGBA16F scene is 8 bytes per pixel against 4 for the RGBA8 the direct path
+uses. At 8K with 2× supersampling that is 15360×8640×8 ≈ 1.06 GB before the
+chain, so `planSsaa()` reduces the factor until the whole thing fits under
+~600 MB and the export dialog says which limit it hit — the GPU's texture size,
+or this. 8K falls to 1×; 4K at 2× is unaffected.
+
+`RG11B10F` would be 4 bytes and avoid the cap, but it has no alpha channel to
+carry the circle of confusion.
+
+### Cost
+
+At preview resolution the chain is free (both paths sit on the 120 fps vsync cap
+on an RTX 4090). A 4K still at 2× with both effects on takes ~0.23 s, against
+~0.26 s without — the chain is a dozen texture fetches per pixel against the
+liquid shader's hundreds of noise evaluations, which is also why it is the one
+part of a large export that is *not* split into scissored bands.
 
 ## Export
 
@@ -67,7 +288,8 @@ Renders into an offscreen framebuffer at `size × supersampling`, box-filters it
 down in a resolve pass, then reads it back to a PNG/JPEG/WebP download.
 
 - Supersampling is reduced automatically if `size × factor` would exceed the
-  GPU's maximum texture size, and the dialog says so rather than degrading
+  GPU's maximum texture size — or the post chain's memory budget, when bloom or
+  depth of field is on — and the dialog says which, rather than degrading
   silently.
 - Large renders are drawn in scissored horizontal bands across several frames.
   A single multi-second draw call risks a GPU watchdog reset and a lost context,
@@ -150,7 +372,16 @@ any pointer activity.
 ```
 src/
   gl/          renderer, GL helpers, GLSL (with a small #include resolver)
-  params/      schema (single source of truth), presets, serialisation, resolutions
-  ui/          control panel, param rows, preset bar, export dialog
+                 liquid.frag    shading, palette, exposure
+                 grade.glsl     the grade, shared by the two output paths
+                 downsample.frag / blur.frag / post.frag   the lens chain
+                 resolve.frag   supersampling box filter
+  params/      schema (single source of truth), presets, gradients, matcaps,
+               serialisation, resolutions
+  ui/          control panel, param rows, preset bar, export dialog, variations
   App.tsx      layout, render loop, undo, shortcuts
 ```
+
+`ControlPanel` takes an `extras` map so a group can hold a row that is not a
+single serialisable value — the custom-matcap picker, the "no float targets"
+warning — without inventing a schema kind for each of them.

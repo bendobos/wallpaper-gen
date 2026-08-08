@@ -11,6 +11,9 @@ export const GROUPS = [
   'Material',
   'Lighting',
   'Color',
+  // Everything that happens to the light after it leaves the surface but before
+  // the grade. Split out of Post once it outgrew a single readable list.
+  'Lens',
   'Post',
 ] as const;
 
@@ -121,6 +124,19 @@ export const PARAM_SCHEMA = [
     hint: 'Perturbs the normal without changing the shape. Keeps polished surfaces from reading as plastic.' },
   { kind: 'slider', key: 'crease', label: 'Crease', group: 'Surface', uniform: 'uCrease',
     min: 0, max: 1, step: 0.01, default: 0.25, random: [0, 0.7] },
+  // Costs three extra height-field evaluations, roughly doubling the shading
+  // cost — but only above zero, which is why it is gated in the shader.
+  { kind: 'slider', key: 'cavity', label: 'Cavity', group: 'Surface', uniform: 'uCavity',
+    min: 0, max: 1, step: 0.01, default: 0, random: [0, 0.6],
+    hint: 'Darkens concave regions. Nothing here was ever shadowed before — this is what stops a crumpled surface from reading as flat.' },
+  { kind: 'slider', key: 'cavityRange', label: 'Cavity Range', group: 'Surface', uniform: 'uCavityRange',
+    min: 0.001, max: 0.06, step: 0.001, default: 0.01,
+    hint: 'How deep a crease has to be to darken fully. Lower means more of the surface counts as a crease.' },
+  { kind: 'slider', key: 'brush', label: 'Brushed', group: 'Surface', uniform: 'uBrush',
+    min: 0, max: 1, step: 0.01, default: 0, random: [0, 0.8],
+    hint: 'Squashes the Micro Detail noise into parallel striations, stretching the highlight across them. Needs Micro Detail above zero — it shapes that noise rather than adding its own.' },
+  { kind: 'slider', key: 'brushAngle', label: 'Brush Angle', group: 'Surface', uniform: 'uBrushAngle',
+    min: -90, max: 90, step: 1, default: 0, random: [-90, 90] },
 
   // --------------------------------------------------------------- material
   { kind: 'select', key: 'material', label: 'Mode', group: 'Material', uniform: 'uMaterial',
@@ -143,6 +159,11 @@ export const PARAM_SCHEMA = [
     min: 0, max: 4, step: 0.01, default: 0.8, random: [0, 2] },
 
   // --------------------------------------------------------------- lighting
+  // Options 1..n must stay in step with MATCAPS in params/matcaps.ts, which the
+  // leading Procedural entry offsets by one, and Custom must stay last.
+  { kind: 'select', key: 'envMode', label: 'Environment', group: 'Lighting', uniform: 'uEnvMode',
+    options: ['Procedural', 'Studio', 'Sunset', 'Neon City', 'Soft Tent', 'Custom…'], default: 0,
+    hint: 'Procedural builds the environment from softbox strips, which vary only with height. A matcap is a painted lit sphere and can have structure the strips cannot.' },
   { kind: 'slider', key: 'lightAngle', label: 'Light Angle', group: 'Lighting', uniform: 'uLightAngle',
     min: -180, max: 180, step: 1, default: 35, random: [-180, 180] },
   { kind: 'slider', key: 'lightElev', label: 'Light Elevation', group: 'Lighting', uniform: 'uLightElev',
@@ -151,9 +172,10 @@ export const PARAM_SCHEMA = [
     min: 0, max: 6, step: 0.01, default: 1.2, random: [0.4, 2.5] },
   { kind: 'slider', key: 'envBands', label: 'Softbox Count', group: 'Lighting', uniform: 'uEnvBands',
     min: 0, max: 8, step: 1, default: 3, random: [1, 5],
-    hint: 'Horizontal strip lights in the procedural studio environment.' },
+    hint: 'Horizontal strip lights in the procedural studio environment. Procedural only — a matcap has no strips to count.' },
   { kind: 'slider', key: 'envContrast', label: 'Env Contrast', group: 'Lighting', uniform: 'uEnvContrast',
-    min: 0, max: 4, step: 0.01, default: 1.3, random: [0.5, 2.5] },
+    min: 0, max: 4, step: 0.01, default: 1.3, random: [0.5, 2.5],
+    hint: 'Strength of the softbox strips. Over a matcap it becomes a gamma on the image instead, neutral at this default.' },
   { kind: 'slider', key: 'ambient', label: 'Ambient', group: 'Lighting', uniform: 'uAmbient',
     min: 0, max: 1, step: 0.005, default: 0.03, random: [0, 0.15] },
 
@@ -171,6 +193,47 @@ export const PARAM_SCHEMA = [
     min: -180, max: 180, step: 1, default: 0, random: [-180, 180] },
   { kind: 'slider', key: 'saturation', label: 'Saturation', group: 'Color', uniform: 'uSaturation',
     min: 0, max: 2.5, step: 0.01, default: 1, random: [0.6, 1.6] },
+
+  // ------------------------------------------------------------------- lens
+  // Any of these above zero routes the render through an offscreen HDR chain
+  // instead of the single direct pass. All neutral by default, which is what
+  // keeps every existing look byte-identical — the chain is not merely
+  // bypassed, it is never built.
+  { kind: 'slider', key: 'bloom', label: 'Bloom', group: 'Lens', uniform: 'uBloom',
+    min: 0, max: 2, step: 0.01, default: 0, random: [0, 0.6],
+    hint: 'Glow bled out of the highlights, taken from the scene before the tonemap shoulder — which is why it reads as a lens rather than as a blurred copy.' },
+  { kind: 'slider', key: 'bloomThreshold', label: 'Bloom Threshold', group: 'Lens', uniform: 'uBloomThreshold',
+    min: 0, max: 3, step: 0.01, default: 0.8,
+    hint: 'How bright a pixel must be to glow. Reflective surfaces run well past 1, so values above 1 still leave plenty glowing.' },
+  { kind: 'slider', key: 'bloomRadius', label: 'Bloom Radius', group: 'Lens', uniform: 'uBloomRadius',
+    min: 0.5, max: 4, step: 0.05, default: 1.5 },
+  { kind: 'color', key: 'bloomTint', label: 'Glow Tint', group: 'Lens', uniform: 'uBloomTint',
+    default: '#ffffff',
+    hint: 'Colours both the bloom and the streak. Warm gives halation, cool gives the blue of an anamorphic lens.' },
+  { kind: 'slider', key: 'streak', label: 'Anamorphic Streak', group: 'Lens', uniform: 'uStreak',
+    min: 0, max: 2, step: 0.01, default: 0, random: [0, 0.5],
+    hint: 'Smears highlights along one axis, the way a cinema anamorphic lens flares. Uses the Bloom Threshold to decide what counts as a highlight.' },
+  // Consumed CPU-side: it sets the direction of the two blur passes, so there
+  // is no uniform for the shader to read.
+  { kind: 'slider', key: 'streakAngle', label: 'Streak Angle', group: 'Lens',
+    min: -90, max: 90, step: 1, default: 0 },
+  { kind: 'slider', key: 'chromatic', label: 'Chromatic Aberration', group: 'Lens', uniform: 'uChromatic',
+    min: 0, max: 2, step: 0.01, default: 0, random: [0, 0.6],
+    hint: 'Reads the three channels at slightly different radii, so the frame edges fringe while the centre stays clean.' },
+  { kind: 'slider', key: 'distortion', label: 'Lens Distortion', group: 'Lens', uniform: 'uDistortion',
+    min: -0.4, max: 0.4, step: 0.005, default: 0,
+    hint: 'Barrel above zero, pincushion below. Barrel pulls the corners in from outside the frame, where they smear — which is where the range stops.' },
+  // No random band: a blur with an unrelated focus height is just a blur, so
+  // Randomize and Variations leave depth of field alone.
+  { kind: 'slider', key: 'dof', label: 'Depth of Field', group: 'Lens', uniform: 'uDof',
+    min: 0, max: 1, step: 0.01, default: 0,
+    hint: 'There is no depth buffer here, so surface height is the depth: pick a height to keep sharp and everything away from it softens.' },
+  { kind: 'slider', key: 'dofFocus', label: 'Focus Height', group: 'Lens', uniform: 'uDofFocus',
+    min: 0, max: 1, step: 0.01, default: 0.5,
+    hint: 'The height field sits near 0.5, so values near either end put nothing in focus. 0 favours the troughs, 1 the crests.' },
+  { kind: 'slider', key: 'dofRange', label: 'Focus Range', group: 'Lens', uniform: 'uDofRange',
+    min: 0.02, max: 1, step: 0.01, default: 0.3,
+    hint: 'How much of the height range stays sharp.' },
 
   // ------------------------------------------------------------------- post
   { kind: 'slider', key: 'exposure', label: 'Exposure', group: 'Post', uniform: 'uExposure',

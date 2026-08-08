@@ -1,0 +1,5 @@
+# The repository stores LF and checks out LF on every platform. Without this,
+# a Windows clone with core.autocrlf=true wants CRLF in the working tree while
+# the history holds LF, which makes `git checkout` refuse to switch branches
+# over files that `git status` reports as clean.
+* text=auto eol=lf

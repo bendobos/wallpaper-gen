@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LiquidRenderer } from './gl/renderer';
-import { DEFAULTS, type Group, type ParamKey, type Params } from './params/schema';
+import {
+  DEFAULTS,
+  type Group,
+  type ParamKey,
+  type Params,
+  type SimpleSection,
+} from './params/schema';
 import { BUILTIN_PRESETS } from './params/presets';
 import { bakeMatcap, ENV_CUSTOM, ENV_PROCEDURAL } from './params/matcaps';
 import {
@@ -8,19 +14,23 @@ import {
   encodeParams,
   loadKeptLooks,
   loadStoredParams,
+  loadUiMode,
   loadUserPresets,
   MAX_KEPT,
   randomizeParams,
   randomSeed,
   storeKeptLooks,
   storeParams,
+  storeUiMode,
   storeUserPresets,
   type KeptLook,
   type StoredPreset,
+  type UiMode,
 } from './params/serialize';
 import ControlPanel from './ui/ControlPanel';
 import PresetBar from './ui/PresetBar';
 import ExportDialog from './ui/ExportDialog';
+import GuideDialog from './ui/GuideDialog';
 import LoopSpeed from './ui/LoopSpeed';
 import VariationsGrid from './ui/VariationsGrid';
 import MatcapUpload from './ui/MatcapUpload';
@@ -50,11 +60,13 @@ export default function App() {
 
   const [fatal, setFatal] = useState<string | null>(null);
   const [params, setParams] = useState<Params>(initialParams);
+  const [uiMode, setUiMode] = useState<UiMode>(loadUiMode);
   const [output, setOutput] = useState({ width: 3840, height: 2160 });
   const [quality, setQuality] = useState(0.75);
   const [playing, setPlaying] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showVariations, setShowVariations] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [userPresets, setUserPresets] = useState<StoredPreset[]>(() => loadUserPresets());
   const [kept, setKept] = useState<KeptLook[]>(() => loadKeptLooks());
@@ -221,6 +233,12 @@ export default function App() {
     return () => clearTimeout(id);
   }, [params]);
 
+  // Kept out of the params payload above on purpose: the mode is a preference
+  // of the person, not part of the look, so it must not ride along in a link.
+  useEffect(() => {
+    storeUiMode(uiMode);
+  }, [uiMode]);
+
   // ------------------------------------------------------------- actions --
 
   const pushUndo = useCallback(() => {
@@ -261,6 +279,21 @@ export default function App() {
     setToast(msg);
     setTimeout(() => setToast((t) => (t === msg ? null : t)), 1800);
   }, []);
+
+  /**
+   * Applies a recipe from the guide over the current look. A patch rather than a
+   * whole parameter set on purpose: a recipe is an effect you add to what you
+   * have, not a preset that replaces it.
+   */
+  const applyRecipe = useCallback(
+    (patch: Partial<Params>, name: string) => {
+      pushUndo();
+      setParams((p) => ({ ...p, ...patch }));
+      setActivePreset(null);
+      showToast(`Applied “${name}” — Ctrl+Z to undo`);
+    },
+    [pushUndo, showToast],
+  );
 
   // Pausing commits the live animation time into `phase`, so the Phase slider
   // and any export agree with the frame currently on screen.
@@ -349,26 +382,33 @@ export default function App() {
   }, []);
 
   // Rows that belong inside a control group but are not a single serialisable
-  // value, so they are not in the schema.
-  const panelExtras = useMemo<Partial<Record<Group, React.ReactNode>>>(
-    () => ({
-      Lighting:
-        params.envMode === ENV_CUSTOM ? (
-          <MatcapUpload
-            loaded={customMatcap?.name ?? null}
-            onLoad={(name, levels) => setCustomMatcap({ name, levels })}
-            onClear={() => setCustomMatcap(null)}
-          />
-        ) : null,
-      Lens: postSupported ? null : (
-        <p className="note warn">
-          Bloom and depth of field need a float render target, which this browser's WebGL2 does
-          not offer (no <code>EXT_color_buffer_float</code>). Both are ignored here.
-        </p>
-      ),
-    }),
-    [params.envMode, customMatcap, postSupported],
-  );
+  // value, so they are not in the schema. Each is registered under both its
+  // expert group and its simple section — the controls they belong to (custom
+  // environment, bloom) exist in both panels.
+  const panelExtras = useMemo<Partial<Record<Group | SimpleSection, React.ReactNode>>>(() => {
+    const matcap =
+      params.envMode === ENV_CUSTOM ? (
+        <MatcapUpload
+          loaded={customMatcap?.name ?? null}
+          onLoad={(name, levels) => setCustomMatcap({ name, levels })}
+          onClear={() => setCustomMatcap(null)}
+        />
+      ) : null;
+
+    const postWarning = postSupported ? null : (
+      <p className="note warn">
+        Bloom and depth of field need a float render target, which this browser's WebGL2 does not
+        offer (no <code>EXT_color_buffer_float</code>). Both are ignored here.
+      </p>
+    );
+
+    return {
+      Lighting: matcap,
+      'Light & Material': matcap,
+      Lens: postWarning,
+      Finish: postWarning,
+    };
+  }, [params.envMode, customMatcap, postSupported]);
 
   // ------------------------------------------------------------ immersive --
 
@@ -460,6 +500,9 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleImmersive();
+      } else if (e.key.toLowerCase() === 'h' || e.key === '?') {
+        e.preventDefault();
+        setShowGuide((v) => !v);
       } else if (e.key === 'Escape' && immersiveRef.current) {
         // Only reached when there is no native fullscreen to escape from;
         // otherwise the browser handles Escape and fullscreenchange syncs us.
@@ -586,6 +629,13 @@ export default function App() {
           >
             {immersive ? '⤡ Exit' : '⛶ Fullscreen'}
           </button>
+          <button
+            className="btn"
+            onClick={() => setShowGuide(true)}
+            title="Tips and recipes (H)"
+          >
+            ? Guide
+          </button>
           <button className="btn" onClick={copyLink} title="Copy a link that restores this look">
             ⧉ Link
           </button>
@@ -597,7 +647,23 @@ export default function App() {
 
       <aside className="panel">
         <div className="panel-head">
-          <div className="brand">Liquid · Wallpaper Generator</div>
+          <div className="brand">Liquid</div>
+          <div className="seg" title="Simple shows a short, plain-language set of controls">
+            <button
+              className={uiMode === 'simple' ? 'on' : ''}
+              aria-pressed={uiMode === 'simple'}
+              onClick={() => setUiMode('simple')}
+            >
+              Simple
+            </button>
+            <button
+              className={uiMode === 'expert' ? 'on' : ''}
+              aria-pressed={uiMode === 'expert'}
+              onClick={() => setUiMode('expert')}
+            >
+              Expert
+            </button>
+          </div>
         </div>
 
         <KeepShelf
@@ -619,9 +685,14 @@ export default function App() {
             onDelete={deletePreset}
           />
           <ControlPanel
+            // Remounting on a mode change re-runs the initially-open logic,
+            // which differs per mode, and costs nothing at this size.
+            key={uiMode}
             params={params}
+            mode={uiMode}
             onChange={setParam}
             onCommitStart={pushUndo}
+            onShowExpert={() => setUiMode('expert')}
             extras={panelExtras}
           />
         </div>
@@ -651,6 +722,10 @@ export default function App() {
           }}
           onClose={() => setShowVariations(false)}
         />
+      )}
+
+      {showGuide && (
+        <GuideDialog mode={uiMode} onClose={() => setShowGuide(false)} onApply={applyRecipe} />
       )}
 
       {toast && <div className="toast">{toast}</div>}

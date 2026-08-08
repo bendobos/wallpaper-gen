@@ -200,6 +200,31 @@ export function storeParams(p: Params) {
   }
 }
 
+/**
+ * Which set of controls the panel shows. Deliberately *not* part of `Params`:
+ * it is a preference of the person, not a property of the look, so it neither
+ * travels in a share link nor gets overwritten by opening one.
+ */
+export type UiMode = 'simple' | 'expert';
+
+const STORAGE_MODE = 'wallpaper-gen:mode';
+
+export function loadUiMode(): UiMode {
+  try {
+    return localStorage.getItem(STORAGE_MODE) === 'expert' ? 'expert' : 'simple';
+  } catch {
+    return 'simple';
+  }
+}
+
+export function storeUiMode(mode: UiMode) {
+  try {
+    localStorage.setItem(STORAGE_MODE, mode);
+  } catch {
+    /* private mode / quota — not worth surfacing */
+  }
+}
+
 export interface StoredPreset {
   name: string;
   params: Params;

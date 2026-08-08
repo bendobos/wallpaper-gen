@@ -72,6 +72,47 @@ Every parameter is defined once in [`src/params/schema.ts`](src/params/schema.ts
 which drives both the control panel and the uniform upload — adding a slider is
 a one-line change.
 
+**? Guide** (`H`) opens the same material as an in-app overlay:
+[`src/ui/GuideDialog.tsx`](src/ui/GuideDialog.tsx) carries quality notes, ten
+effect recipes, workflow and the shortcut list. A recipe is a `Partial<Params>`
+patch applied *on top of* the current look rather than a preset replacing it,
+and the settings listed under each one are rendered from that patch through
+`SCHEMA_BY_KEY` — so the text cannot drift from what Apply writes, and it names
+each setting the way whichever panel you are in names it.
+
+## Simple and Expert
+
+The panel header switches between two views of the same schema.
+
+**Expert** is the full set: 69 controls under the eight groups above, which
+follow the render pipeline. **Simple** is 21 of them under four plain-language
+sections — Pattern, Color, Light & Material, Finish — with the jargon renamed
+(*Warp Strength* → **Swirl**, *Scale* → **Pattern Size**, *Roughness* →
+**Polish**) and every section open, since there is little enough to show whole.
+
+Simple filters, it never remaps: each row writes exactly the parameter it writes
+in Expert, so switching modes cannot change the image and nothing is reset. The
+controls left out are the ones that are inert on their own — `ior` and
+`dispersion` do nothing outside Glass, `bloomThreshold` does nothing at zero
+Bloom — plus the fine-tuning axes (`gain`, `lacunarity`, `anisotropy`, …).
+
+Presets, Randomize and shared links keep setting the full parameter set in
+either mode, so a Simple panel is never the whole story. It says so in a footer
+rather than pretending otherwise.
+
+A control joins Simple by declaring a `simple` block in the schema — section,
+label, and a hint written for someone who has not read this file:
+
+```ts
+{ kind: 'slider', key: 'warp', label: 'Warp Strength', group: 'Flow', …
+  simple: { section: 'Pattern', label: 'Swirl',
+    hint: 'How much the pattern folds into itself.' } },
+```
+
+The chosen mode persists to `localStorage` and is deliberately **not** part of
+`Params`: it belongs to the person, not to the look, so it neither travels in a
+share link nor gets overwritten by opening one.
+
 ## Composition shapes
 
 **Shape** confines the liquid to a circle, rounded square, arch, band or blob
@@ -447,14 +488,16 @@ inherent to any seamless loop.
 
 - The full parameter set is encoded into the URL hash, so any look is shareable
   and restorable. **⧉ Link** copies it.
-- The last state and any saved presets persist to `localStorage`.
+- The last state, any saved presets and the Simple/Expert choice persist to
+  `localStorage`. Only the parameters go into the hash.
 - **Randomize** samples only parameters that declare a narrower random band in
   the schema, so results stay usable. Colours are left alone deliberately.
 
 ## Shortcuts
 
 `Space` play/pause · `R` randomize · `S` new seed · `V` variations · `K` keep ·
-`E` export · `F` fullscreen · `Esc` leave fullscreen · `Ctrl+Z` undo
+`E` export · `H` guide · `F` fullscreen · `Esc` close / leave fullscreen ·
+`Ctrl+Z` undo
 
 Fullscreen hides the panel and gives the preview the whole screen, still
 letterboxed to the export aspect — so a portrait phone wallpaper previews
@@ -475,10 +518,12 @@ src/
   params/      schema (single source of truth), presets, gradients, matcaps,
                palette extraction, zip writer, serialisation, resolutions
   ui/          control panel, param rows, preset bar, export dialog, variations,
-               keep shelf
+               keep shelf, guide overlay
   App.tsx      layout, render loop, undo, shortcuts
 ```
 
 `ControlPanel` takes an `extras` map so a group can hold a row that is not a
 single serialisable value — the custom-matcap picker, the "no float targets"
-warning — without inventing a schema kind for each of them.
+warning — without inventing a schema kind for each of them. The map is keyed by
+group *or* Simple section, so those rows appear in whichever panel holds the
+control they belong to.

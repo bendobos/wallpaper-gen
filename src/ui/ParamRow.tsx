@@ -9,6 +9,9 @@ interface Props {
   onChange: (value: number | string) => void;
   /** Called once when a drag starts, so the caller can snapshot for undo. */
   onCommitStart?: () => void;
+  /** Overrides `def.label` / `def.hint`, which is how Simple mode renames a row. */
+  label?: string;
+  hint?: string;
 }
 
 function decimalsFor(step: number): number {
@@ -21,8 +24,10 @@ function decimalsFor(step: number): number {
  * label — typing an exact value matters when you are trying to reproduce a look
  * or nudge past the slider's resolution.
  */
-export default function ParamRow({ def, value, onChange, onCommitStart }: Props) {
+export default function ParamRow({ def, value, onChange, onCommitStart, ...naming }: Props) {
   const modified = value !== def.default;
+  const label = naming.label ?? def.label;
+  const hint = naming.hint ?? def.hint;
 
   if (def.kind === 'gradient') {
     return (
@@ -30,6 +35,8 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
         value={String(value)}
         onChange={onChange}
         onCommitStart={onCommitStart}
+        label={label}
+        hint={hint}
       />
     );
   }
@@ -38,8 +45,8 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
     return (
       <div className="row">
         <div className="row-head">
-          <span className={`row-label${modified ? ' modified' : ''}`} title={def.hint}>
-            {def.label}
+          <span className={`row-label${modified ? ' modified' : ''}`} title={hint}>
+            {label}
           </span>
         </div>
         <div className="color-row">
@@ -50,7 +57,7 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
               onCommitStart?.();
               onChange(e.target.value);
             }}
-            aria-label={def.label}
+            aria-label={label}
           />
           <input
             className="color-hex"
@@ -64,7 +71,7 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
                 onChange(v.toLowerCase());
               }
             }}
-            aria-label={`${def.label} hex value`}
+            aria-label={`${label} hex value`}
           />
         </div>
       </div>
@@ -75,8 +82,8 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
     return (
       <div className="row">
         <div className="row-head">
-          <span className={`row-label${modified ? ' modified' : ''}`} title={def.hint}>
-            {def.label}
+          <span className={`row-label${modified ? ' modified' : ''}`} title={hint}>
+            {label}
           </span>
         </div>
         <select
@@ -85,7 +92,7 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
             onCommitStart?.();
             onChange(Number(e.target.value));
           }}
-          aria-label={def.label}
+          aria-label={label}
         >
           {def.options.map((opt, i) => (
             <option key={opt} value={i}>
@@ -97,7 +104,16 @@ export default function ParamRow({ def, value, onChange, onCommitStart }: Props)
     );
   }
 
-  return <SliderRow def={def} value={Number(value)} onChange={onChange} onCommitStart={onCommitStart} />;
+  return (
+    <SliderRow
+      def={def}
+      value={Number(value)}
+      onChange={onChange}
+      onCommitStart={onCommitStart}
+      label={label}
+      hint={hint}
+    />
+  );
 }
 
 function SliderRow({
@@ -105,11 +121,15 @@ function SliderRow({
   value,
   onChange,
   onCommitStart,
+  label,
+  hint,
 }: {
   def: Extract<ParamDef, { kind: 'slider' }>;
   value: number;
   onChange: (v: number) => void;
   onCommitStart?: () => void;
+  label: string;
+  hint?: string;
 }) {
   const dp = decimalsFor(def.step);
   const [text, setText] = useState(() => value.toFixed(dp));
@@ -138,8 +158,8 @@ function SliderRow({
   return (
     <div className="row">
       <div className="row-head">
-        <span className={`row-label${modified ? ' modified' : ''}`} title={def.hint}>
-          {def.label}
+        <span className={`row-label${modified ? ' modified' : ''}`} title={hint}>
+          {label}
         </span>
         <input
           className="row-value"
@@ -157,7 +177,7 @@ function SliderRow({
               e.currentTarget.blur();
             }
           }}
-          aria-label={`${def.label} value`}
+          aria-label={`${label} value`}
         />
       </div>
       <input
@@ -168,7 +188,7 @@ function SliderRow({
         value={value}
         {...handlers}
         onChange={(e) => accept(Number(e.target.value), onChange)}
-        aria-label={def.label}
+        aria-label={label}
       />
     </div>
   );

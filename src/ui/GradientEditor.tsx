@@ -12,6 +12,9 @@ interface Props {
   value: string;
   onChange: (spec: string) => void;
   onCommitStart?: () => void;
+  /** Row heading. Simple mode calls this "Colors" rather than "Gradient". */
+  label?: string;
+  hint?: string;
 }
 
 /**
@@ -23,7 +26,13 @@ interface Props {
  * stops the panel scrolling out from under a drag. The bar itself keeps
  * `pan-y`, so scrolling past the editor still works.
  */
-export default function GradientEditor({ value, onChange, onCommitStart }: Props) {
+export default function GradientEditor({
+  value,
+  onChange,
+  onCommitStart,
+  label = 'Gradient',
+  hint = 'Maps image brightness to colour',
+}: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState(0);
@@ -101,8 +110,8 @@ export default function GradientEditor({ value, onChange, onCommitStart }: Props
   return (
     <div className="row">
       <div className="row-head">
-        <span className="row-label" title="Maps image brightness to colour">
-          Gradient
+        <span className="row-label" title={hint}>
+          {label}
         </span>
         <select
           className="ramp-preset"

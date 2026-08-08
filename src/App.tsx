@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LiquidRenderer } from './gl/renderer';
 import {
-  DEFAULTS,
   type Group,
   type ParamKey,
   type Params,
@@ -28,13 +27,12 @@ import {
   type UiMode,
 } from './params/serialize';
 import ControlPanel from './ui/ControlPanel';
-import PresetBar from './ui/PresetBar';
+import LooksPanel from './ui/LooksPanel';
 import ExportDialog from './ui/ExportDialog';
 import GuideDialog from './ui/GuideDialog';
 import LoopSpeed from './ui/LoopSpeed';
 import VariationsGrid from './ui/VariationsGrid';
 import MatcapUpload from './ui/MatcapUpload';
-import KeepShelf from './ui/KeepShelf';
 
 const MAX_UNDO = 60;
 
@@ -90,6 +88,8 @@ export default function App() {
   const timeRef = useRef(params.phase);
   const dirtyRef = useRef(true);
   const undoRef = useRef<Params[]>([]);
+  /** Set while the Looks panel is rendering thumbnails; see the render loop. */
+  const thumbsBusyRef = useRef(false);
 
   paramsRef.current = params;
   playingRef.current = playing;
@@ -167,14 +167,27 @@ export default function App() {
   // rather than at startup and there is no loading state to manage. Clearing
   // the texture is what makes the renderer fall back to the procedural
   // environment, which is how a link carrying a custom matcap degrades.
-  useEffect(() => {
+  //
+  // Exposed as a callback because the matcap is a single shared texture: the
+  // Looks panel swaps it per thumbnail and calls this to put the current look's
+  // own environment back.
+  const applyMatcap = useCallback(() => {
     const r = rendererRef.current;
     if (!r) return;
-    const mode = params.envMode;
+    const mode = paramsRef.current.envMode;
     if (mode === ENV_PROCEDURAL) return; // texture unused; leave whatever is there
     r.setMatcap(mode === ENV_CUSTOM ? (customMatcap?.levels ?? null) : bakeMatcap(mode));
     dirtyRef.current = true;
-  }, [params.envMode, customMatcap]);
+  }, [customMatcap]);
+
+  useEffect(() => {
+    applyMatcap();
+  }, [params.envMode, applyMatcap]);
+
+  const setThumbsBusy = useCallback((busy: boolean) => {
+    thumbsBusyRef.current = busy;
+    if (!busy) dirtyRef.current = true; // repaint whatever the pause held back
+  }, []);
 
   // --------------------------------------------------------- render loop --
 
@@ -203,7 +216,11 @@ export default function App() {
         dirtyRef.current = true;
       }
 
-      if (dirtyRef.current && rendererRef.current) {
+      // Thumbnail rendering borrows the shared matcap texture and yields a
+      // frame per band, so drawing the preview meanwhile would flicker through
+      // other looks' environments. Holding the last frame for a second is the
+      // cheaper answer than giving every look its own texture.
+      if (dirtyRef.current && rendererRef.current && !thumbsBusyRef.current) {
         rendererRef.current.draw(paramsRef.current, timeRef.current);
         dirtyRef.current = false;
         frames++;
@@ -274,6 +291,20 @@ export default function App() {
     },
     [pushUndo],
   );
+
+  // Shared by the Looks panel and the keyboard handler, so a shortcut and its
+  // button cannot drift apart.
+  const newSeed = useCallback(() => {
+    pushUndo();
+    setParams((p) => ({ ...p, seed: randomSeed() }));
+    setActivePreset(null);
+  }, [pushUndo]);
+
+  const randomizeAll = useCallback(() => {
+    pushUndo();
+    setParams((p) => randomizeParams(p));
+    setActivePreset(null);
+  }, [pushUndo]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -481,13 +512,9 @@ export default function App() {
         e.preventDefault();
         togglePlay();
       } else if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey) {
-        pushUndo();
-        setParams((p) => randomizeParams(p));
-        setActivePreset(null);
+        randomizeAll();
       } else if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey) {
-        pushUndo();
-        setParams((p) => ({ ...p, seed: randomSeed() }));
-        setActivePreset(null);
+        newSeed();
       } else if (e.key.toLowerCase() === 'e') {
         e.preventDefault();
         openExport();
@@ -511,7 +538,16 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, togglePlay, pushUndo, openExport, toggleImmersive, exitImmersive, keepCurrent]);
+  }, [
+    undo,
+    togglePlay,
+    randomizeAll,
+    newSeed,
+    openExport,
+    toggleImmersive,
+    exitImmersive,
+    keepCurrent,
+  ]);
 
   // ---------------------------------------------------------------- view --
 
@@ -541,8 +577,30 @@ export default function App() {
           >
             <canvas ref={canvasRef} />
           </div>
+
+          {/* What the preview *is*, rather than what you can do to it — so it
+              sits on the image instead of taking a slot in the toolbar. The
+              quality switch fades in on hover; see .stage-overlay. */}
+          <div className={`stage-overlay${immersive && !controlsShown ? ' hidden' : ''}`}>
+            <div className="seg" title="Preview render scale">
+              {QUALITY_OPTIONS.map((q) => (
+                <button
+                  key={q.label}
+                  className={quality === q.value ? 'on' : ''}
+                  onClick={() => setQuality(q.value)}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+            <span className="readout">
+              {output.width}×{output.height} · {fps} fps
+            </span>
+          </div>
         </div>
 
+        {/* Playback on the left, output on the right. Everything that changes
+            the look itself lives in the Looks panel now. */}
         <div className={`stage-bar${immersive && !controlsShown ? ' hidden' : ''}`}>
           <button className="btn" onClick={togglePlay} title="Play / pause (Space)">
             {playing ? '❚❚ Pause' : '▶ Play'}
@@ -553,91 +611,32 @@ export default function App() {
             onChange={(v) => setParams((p) => ({ ...p, loopSeconds: v }))}
             onCommitStart={pushUndo}
           />
-          <button
-            className="btn"
-            onClick={() => {
-              pushUndo();
-              setParams((p) => ({ ...p, seed: randomSeed() }));
-              setActivePreset(null);
-            }}
-            title="New seed (S)"
-          >
-            ⟳ Seed
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              pushUndo();
-              setParams((p) => randomizeParams(p));
-              setActivePreset(null);
-            }}
-            title="Randomize everything (R)"
-          >
-            ✦ Randomize
-          </button>
-          <button
-            className="btn"
-            onClick={() => setShowVariations(true)}
-            title="Explore variations of this look (V)"
-          >
-            ▦ Variations
-          </button>
-          <button
-            className="btn"
-            onClick={() => void keepCurrent()}
-            title="Pin this look to the shelf (K)"
-          >
-            ☆ Keep
-          </button>
-          <button className="btn" onClick={undo} title="Undo (Ctrl+Z)">
-            ↶ Undo
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              pushUndo();
-              setParams(DEFAULTS);
-              setActivePreset(null);
-            }}
-          >
-            Reset
-          </button>
 
           <span className="spacer" />
 
-          <div className="seg" title="Preview render scale">
-            {QUALITY_OPTIONS.map((q) => (
-              <button
-                key={q.label}
-                className={quality === q.value ? 'on' : ''}
-                onClick={() => setQuality(q.value)}
-                style={{ padding: '5px 8px' }}
-              >
-                {q.label}
-              </button>
-            ))}
-          </div>
-
-          <span className="readout">
-            {output.width}×{output.height} · {fps} fps
-          </span>
-
           <button
-            className="btn"
+            className="btn icon"
             onClick={toggleImmersive}
+            aria-label={immersive ? 'Exit fullscreen' : 'Fullscreen preview'}
             title={immersive ? 'Exit fullscreen (F or Esc)' : 'Fullscreen preview (F)'}
           >
-            {immersive ? '⤡ Exit' : '⛶ Fullscreen'}
+            {immersive ? '⤡' : '⛶'}
           </button>
           <button
-            className="btn"
+            className="btn icon"
             onClick={() => setShowGuide(true)}
+            aria-label="Tips and recipes"
             title="Tips and recipes (H)"
           >
-            ? Guide
+            ?
           </button>
-          <button className="btn" onClick={copyLink} title="Copy a link that restores this look">
-            ⧉ Link
+          <button
+            className="btn icon"
+            onClick={copyLink}
+            aria-label="Copy a link to this look"
+            title="Copy a link that restores this look"
+          >
+            ⧉
           </button>
           <button className="btn primary" onClick={openExport} title="Export (E)">
             ↓ Export
@@ -666,23 +665,29 @@ export default function App() {
           </div>
         </div>
 
-        <KeepShelf
-          looks={kept}
-          onApply={(next) => {
-            pushUndo();
-            setParams(next);
-            setActivePreset(null);
-          }}
-          onRemove={removeKept}
-        />
-
         <div className="panel-scroll">
-          <PresetBar
-            active={activePreset}
+          <LooksPanel
+            renderer={rendererRef.current}
+            aspect={output.width / output.height}
+            activePreset={activePreset}
             userPresets={userPresets}
+            kept={kept}
             onApply={applyPreset}
             onSave={savePreset}
-            onDelete={deletePreset}
+            onDeletePreset={deletePreset}
+            onKeep={() => void keepCurrent()}
+            onApplyKept={(next) => {
+              pushUndo();
+              setParams(next);
+              setActivePreset(null);
+            }}
+            onRemoveKept={removeKept}
+            onRandomize={randomizeAll}
+            onVariations={() => setShowVariations(true)}
+            onSeed={newSeed}
+            onUndo={undo}
+            onThumbsBusy={setThumbsBusy}
+            onRestoreMatcap={applyMatcap}
           />
           <ControlPanel
             // Remounting on a mode change re-runs the initially-open logic,

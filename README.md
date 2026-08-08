@@ -414,10 +414,36 @@ Choosing which box to split differently does not help; the median is the
 problem, not the selection. Anchors are averaged over the darkest and brightest
 2% so a single stuck pixel cannot set the end of a ramp.
 
-**Keep shelf** pins looks worth returning to. Undo is a single linear stack, so
-a good result found two experiments ago is otherwise gone. Capped at 40 entries
-— localStorage is a ~5 MB budget shared with saved presets, and each thumbnail
-is about 8 KB.
+**Keep** pins looks worth returning to. Undo is a single linear stack, so a good
+result found two experiments ago is otherwise gone. Capped at 40 entries —
+localStorage is a ~5 MB budget shared with saved presets, and each thumbnail is
+about 8 KB.
+
+## Where things live
+
+The screen splits by what a control *does*, not by when it was added.
+
+The bar under the stage carries playback on the left and output on the right:
+Play, the preview's loop duration, then fullscreen, guide, link and Export.
+Resolution and frame rate are stated quietly over the image itself, with the
+preview render scale appearing beside them on hover — it is wanted while
+hunting for frame rate and never otherwise.
+
+Everything that changes a look lives in the panel. **Looks** is one surface for
+picking one, in three tabs: the built-in presets, your saved ones, and the keep
+shelf. Tiles rather than names, because these are images — the name appears on
+hover and stays on the one currently applied. The first tile in each tab is the
+one that *makes* an entry there: Default resets, Save current names a preset,
+Keep current pins the look. Directly under them sit Randomize, Variations, Seed
+and Undo, and under those the sliders they operate on.
+
+Preset thumbnails are rendered on first open through the same path exports use
+([`useLookThumbs.ts`](src/ui/useLookThumbs.ts)), sequentially so the grid fills
+progressively, and cached for the session only — a stored image would go stale
+the moment a preset is retuned. The matcap is a single shared texture, so each
+tile binds its own environment and the current look's is restored afterwards;
+the preview holds its last frame meanwhile rather than flickering through other
+looks' lighting.
 
 ## Export
 
@@ -517,8 +543,8 @@ src/
                  resolve.frag   supersampling box filter
   params/      schema (single source of truth), presets, gradients, matcaps,
                palette extraction, zip writer, serialisation, resolutions
-  ui/          control panel, param rows, preset bar, export dialog, variations,
-               keep shelf, guide overlay
+  ui/          control panel, param rows, looks panel, export dialog,
+               variations, guide overlay
   App.tsx      layout, render loop, undo, shortcuts
 ```
 

@@ -75,6 +75,19 @@ export const PARAM_SCHEMA = [
     min: -180, max: 180, step: 1, default: 0, random: [-180, 180] },
 
   // ------------------------------------------------------------------- flow
+  // No random band: the three bases are different enough that shuffling
+  // between them is a change of subject, not a variation. Cellular also costs
+  // roughly twice a gradient evaluation, so Randomize would silently make the
+  // preview slower.
+  { kind: 'select', key: 'noiseBasis', label: 'Noise Basis', group: 'Flow', uniform: 'uNoiseBasis',
+    options: ['Gradient', 'Cellular', 'Cellular Ridges'], default: 0,
+    hint: 'Gradient is smooth and flowing. Cellular gives rounded cells with hard boundaries; Ridges gives the thin walls between them — cracks and veins, which gradient noise has no way to produce.' },
+  { kind: 'slider', key: 'curl', label: 'Curl Flow', group: 'Flow', uniform: 'uCurl',
+    min: 0, max: 1.5, step: 0.01, default: 0, random: [0, 0.8],
+    hint: 'Advects the field along a divergence-free flow, so it transports rather than kneading in place. This is what turns the animation from churning into flowing.' },
+  { kind: 'slider', key: 'curlScale', label: 'Curl Scale', group: 'Flow', uniform: 'uCurlScale',
+    min: 0.2, max: 4, step: 0.01, default: 1,
+    hint: 'Size of the vortices the flow wraps around.' },
   { kind: 'slider', key: 'scale', label: 'Scale', group: 'Flow', uniform: 'uScale',
     min: 0.1, max: 8, step: 0.01, default: 1, random: [0.4, 1.8],
     hint: 'Size of the underlying noise features.' },

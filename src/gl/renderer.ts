@@ -244,6 +244,8 @@ export class LiquidRenderer {
   private liquidDefines(params: Params): string[] {
     const defines: string[] = [];
     if (params.cavity > 0.001) defines.push('FEAT_CAVITY');
+    if (params.noiseBasis > 0.5) defines.push('FEAT_CELLULAR');
+    if (params.curl > 0.001) defines.push('FEAT_CURL');
     return defines;
   }
 

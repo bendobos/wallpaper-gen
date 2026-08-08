@@ -29,6 +29,13 @@ uniform float uAnisotropy;
 uniform float uFlowAngle;   // degrees
 uniform float uRidge;
 uniform float uMotion;      // orbit radius of the per-octave animation
+#ifdef FEAT_CELLULAR
+uniform float uNoiseBasis;  // 1 = cellular F1, 2 = cellular F2-F1
+#endif
+#ifdef FEAT_CURL
+uniform float uCurl;
+uniform float uCurlScale;
+#endif
 
 // surface
 uniform float uRelief;
@@ -137,6 +144,94 @@ float fbm(vec2 p) {
   return sum / max(norm, 1e-4);
 }
 
+#ifdef FEAT_CELLULAR
+/**
+ * Worley noise over a 3x3 neighbourhood, rescaled to gnoise's rough [-1, 1].
+ *
+ * F1 gives cells with rounded interiors and hard boundaries; F2 - F1 gives the
+ * thin walls between them, which is the cracked-glass and vein topology that
+ * gradient noise fundamentally cannot produce — it has no notion of a boundary.
+ */
+float worley(vec2 p) {
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float f1 = 8.0;
+  float f2 = 8.0;
+
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 g = vec2(float(x), float(y));
+      // hash22 spans [-1, 1]; halved and offset it places one feature point
+      // anywhere inside the neighbouring cell.
+      vec2 point = g + hash22(cell + g) * 0.5 + 0.5;
+      float d = length(point - f);
+      if (d < f1) { f2 = f1; f1 = d; }
+      else if (d < f2) { f2 = d; }
+    }
+  }
+
+  if (uNoiseBasis > 1.5) return (f2 - f1) * 2.0 - 1.0;
+  return 1.0 - f1 * 2.0;
+}
+
+/**
+ * The octave loop again, over cellular noise.
+ *
+ * Duplicated rather than parameterised on purpose. Giving `fbm` a basis
+ * argument would add a second call site of `gnoise` to the *default* build,
+ * and an extra call site alone is enough to make the driver re-associate and
+ * shift output — the whole reason these features are compiled in rather than
+ * branched around. See fbm() above for why the drift is a closed orbit.
+ */
+float fbmCellular(vec2 p) {
+  vec2 so = seedOffset();
+  float amp = 0.5;
+  float sum = 0.0;
+  float norm = 0.0;
+  mat2 m = rot(0.7);
+
+  for (int i = 0; i < 8; i++) {
+    if (float(i) >= uOctaves) break;
+
+    float a = float(i) * 2.3999632;
+    float harm = float(1 + (i - (i / 3) * 3));
+    float w = TAU * fract(uTime * harm);
+    vec2 drift = rot(a) * (uMotion * vec2(cos(w) - 1.0, sin(w)));
+
+    sum += amp * worley(p + drift + so);
+    norm += amp;
+
+    p = m * p * uLacunarity;
+    amp *= uGain;
+  }
+
+  return sum / max(norm, 1e-4);
+}
+#endif
+
+#ifdef FEAT_CURL
+/**
+ * Divergence-free displacement: the curl of a scalar potential, `(dF/dy,
+ * -dF/dx)`.
+ *
+ * Domain warp folds the field into itself but never transports it, which is
+ * why the animation reads as churning rather than flowing. Advecting along a
+ * curl field gives the streakline structure of a fluid — filaments that wrap
+ * around vortices instead of kneading in place.
+ *
+ * Forward differences, so this costs two extra fbm evaluations rather than the
+ * four a central difference would. The potential is the same `fbm`, so it
+ * inherits the closed-orbit motion model and the loop still closes exactly.
+ */
+vec2 curlFlow(vec2 p) {
+  float e = 0.05;
+  float f0 = fbm(p);
+  float fx = fbm(p + vec2(e, 0.0));
+  float fy = fbm(p + vec2(0.0, e));
+  return vec2(fy - f0, -(fx - f0)) / e;
+}
+#endif
+
 // The surface height at a point in world space. Everything about the shape
 // lives here: anisotropic stretch, domain warp, ridging, crease contrast.
 float heightAt(vec2 p) {
@@ -157,7 +252,21 @@ float heightAt(vec2 p) {
     w += uWarp * o;
   }
 
+#ifdef FEAT_CURL
+  // Advection comes after the warp: the warp decides the topology, this
+  // transports it.
+  w += uCurl * curlFlow(w * uCurlScale) * 0.1;
+#endif
+
+#ifdef FEAT_CELLULAR
+  // Only the final evaluation switches basis. The warp above stays on gradient
+  // noise deliberately — it wants a smooth field, and running four more
+  // cellular evaluations through the warp loop would multiply the cost of the
+  // most expensive part of the shader by the warp iteration count.
+  float h = fbmCellular(w) * 0.5 + 0.5;
+#else
   float h = fbm(w) * 0.5 + 0.5;
+#endif
 
   // Ridging folds the field back on itself at the midpoint, producing the hard
   // creases of polished chrome instead of soft dunes.

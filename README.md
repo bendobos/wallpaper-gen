@@ -63,12 +63,41 @@ you see is the framing you get.
 | **Black Level** | How the high-contrast filament look gets its large black field. |
 | **Environment** | The single biggest change to *what* is being reflected, rather than to the shape reflecting it. |
 | **Cavity** | The only thing here that darkens rather than lights. Creases stop reading as painted-on. |
+| **Noise Basis** | Changes the topology itself, not the treatment of it — the one control that makes a genuinely unrelated image. |
+| **Curl Flow** | The fix for motion that churns instead of flowing. |
 | **Bloom Threshold** | Reflective surfaces run well past 1.0, so values above 1 still leave plenty glowing. |
 | **Focus Height** | The height field sits near 0.5; setting this near either end puts nothing in focus. |
 
 Every parameter is defined once in [`src/params/schema.ts`](src/params/schema.ts),
 which drives both the control panel and the uniform upload — adding a slider is
 a one-line change.
+
+## Shape vocabulary
+
+Every image used to be fbm plus domain warp. Two controls widen that.
+
+**Noise Basis** switches the final height evaluation between gradient noise,
+Worley F1 (rounded cells with hard boundaries) and Worley F2−F1 (the thin walls
+between them — cracks and veins, a topology gradient noise cannot produce
+because it has no notion of a boundary).
+
+Only the *final* evaluation switches. The domain warp stays on gradient noise
+deliberately: it wants a smooth field, and routing four more cellular
+evaluations through the warp loop would multiply the most expensive part of the
+shader by the warp iteration count.
+
+**Curl Flow** advects the field along a divergence-free displacement — the curl
+of a scalar potential, `(dF/dy, −dF/dx)`. Domain warp folds the field into
+itself but never transports it, which is why the README used to concede the
+animation reads as churning; advection gives the streakline structure of a
+fluid instead. The potential is the same `fbm`, so it inherits the closed-orbit
+motion model and the loop still closes exactly — verified byte-identical at
+phase 0 and phase 1.
+
+Both cost almost nothing: at 4K with 8 octaves and 3 warp iterations, gradient
+is 72 ms, cellular 73 ms, curl 65 ms. Worley is roughly twice a gradient
+evaluation, but it runs once against the warp's many, so it disappears into the
+noise.
 
 ## Shader variants
 
@@ -85,6 +114,10 @@ textually the shader that has always run.
 The cost is one compile the first time a feature is switched on: ~6 ms warm,
 up to ~1 s the very first time on a machine, after which the driver's own shader
 cache takes over. Nobody pays for a feature they never enable.
+
+Three features use it — Cavity, the cellular basis and curl advection — and it
+is the same mechanism that keeps bloom's chain unbuilt at zero. Each one adds
+call sites to `heightAt` or `fbm`, which is exactly the trigger.
 
 ## Cavity
 
@@ -108,9 +141,12 @@ control that did nothing at any setting.
 Occlusion scales the environment reflection and the ambient fill, never the rim
 — the rim is a slope term whose whole job is to light creases up.
 
-Measured cost at 4K: 56 ms → 59 ms, about +5%. The plan predicted +100% for the
-three extra height-field evaluations; the driver schedules them far better than
-that.
+Cost depends entirely on how expensive `heightAt` already is, because Cavity
+triples the number of times it runs. On the default preset (4 octaves, 2 warp
+iterations) that is 56 → 59 ms at 4K, about +5%, because the pass is nowhere
+near shader-bound. On a heavy one (8 octaves, 3 warp iterations) it is 72 →
+145 ms — the full 2× the arithmetic predicts. Quote the second number, not the
+first.
 
 ## Brushed metal
 

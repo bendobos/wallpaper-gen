@@ -817,6 +817,91 @@ select.ramp-preset {
   z-index: 60;
 }
 
+/* --------------------------------------------------------- batch export */
+
+.batch-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+
+.batch-cat {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 8px 0 3px;
+}
+
+.batch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.batch-row input {
+  accent-color: var(--accent);
+}
+
+/* ------------------------------------------------------------- keep shelf */
+
+.shelf {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.shelf-item {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.shelf-item img {
+  width: 64px;
+  height: auto;
+  display: block;
+}
+
+.shelf-item:hover {
+  border-color: var(--accent);
+}
+
+.shelf-item .x {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 14px;
+  border: none;
+  border-radius: 2px;
+  background: #000a;
+  color: #fff;
+  opacity: 0;
+}
+
+.shelf-item:hover .x {
+  opacity: 1;
+}
+
 @media (max-width: 820px) {
   .app {
     grid-template-columns: 1fr;

@@ -8,6 +8,7 @@ import {
   RESOLUTIONS,
   type ResolutionPreset,
 } from '../params/resolutions';
+import { blobToBytes, createZip, type ZipEntry } from '../params/zip';
 import {
   estimateBitrate,
   evenSize,
@@ -39,7 +40,8 @@ export default function ExportDialog({
   onSizeChange,
   onClose,
 }: Props) {
-  const [tab, setTab] = useState<'image' | 'video'>('image');
+  const [tab, setTab] = useState<'image' | 'batch' | 'video'>('image');
+  const [batch, setBatch] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
@@ -87,6 +89,55 @@ export default function ExportDialog({
   };
 
   const applyPreset = (r: ResolutionPreset) => onSizeChange({ width: r.width, height: r.height });
+
+  /**
+   * Renders the current look at every selected resolution and delivers one
+   * archive. Sequential on purpose: each render already saturates the GPU, and
+   * the renderer holds one session at a time.
+   */
+  const runBatch = async () => {
+    const chosen = RESOLUTIONS.filter((r) => batch.has(`${r.width}x${r.height}`));
+    if (!chosen.length) return;
+
+    setBusy(true);
+    setError(null);
+    setProgress(0);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    try {
+      const entries: ZipEntry[] = [];
+      for (let i = 0; i < chosen.length; i++) {
+        if (ctrl.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const r = chosen[i];
+        setProgressLabel(`${r.label} · ${i + 1} of ${chosen.length}`);
+        const { canvas, ssaaUsed } = await renderer.exportImage(params, time, {
+          width: r.width,
+          height: r.height,
+          ssaa,
+          onProgress: (f) => setProgress((i + f) / chosen.length),
+        });
+        const blob = await canvasToBlob(canvas, format.mime, imageQuality);
+        entries.push({
+          name: `liquid-${params.seed}-${r.width}x${r.height}${ssaaUsed > 1 ? `-ss${ssaaUsed}` : ''}.${format.ext}`,
+          data: await blobToBytes(blob),
+        });
+      }
+      setProgressLabel('Packing…');
+      downloadBlob(createZip(entries), `liquid-${params.seed}-${entries.length}-sizes.zip`);
+      onClose();
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setProgressLabel('');
+        setProgress(0);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      abortRef.current = null;
+      setBusy(false);
+    }
+  };
 
   const runImage = async () => {
     setBusy(true);
@@ -182,6 +233,15 @@ export default function ExportDialog({
           </button>
           <button
             role="tab"
+            aria-selected={tab === 'batch'}
+            className={tab === 'batch' ? 'on' : ''}
+            onClick={() => setTab('batch')}
+            disabled={busy}
+          >
+            Batch
+          </button>
+          <button
+            role="tab"
             aria-selected={tab === 'video'}
             className={tab === 'video' ? 'on' : ''}
             onClick={() => setTab('video')}
@@ -192,7 +252,9 @@ export default function ExportDialog({
         </div>
 
         <div className="dialog-body">
-          {/* Resolution is shared by both tabs — the preview letterboxes to it. */}
+          {/* Resolution is shared by the single-image and video tabs — the
+              preview letterboxes to it. Batch picks its own sizes instead. */}
+          {tab !== 'batch' && (
           <div className="field">
             <label htmlFor="res-preset">Resolution</label>
             <select
@@ -216,7 +278,9 @@ export default function ExportDialog({
               ))}
             </select>
           </div>
+          )}
 
+          {tab !== 'batch' && (
           <div className="field-grid">
             <div className="field">
               <label htmlFor="ex-w">Width</label>
@@ -241,7 +305,9 @@ export default function ExportDialog({
               />
             </div>
           </div>
+          )}
 
+          {tab !== 'batch' && (
           <button
             className="btn"
             disabled={busy}
@@ -249,8 +315,98 @@ export default function ExportDialog({
           >
             ⇄ Swap orientation
           </button>
+          )}
 
-          {tab === 'image' ? (
+          {tab === 'batch' && (
+            <>
+              <div className="field">
+                <label>Sizes · {batch.size} selected</label>
+                <div className="batch-list">
+                  {CATEGORIES.map((cat) => (
+                    <div key={cat}>
+                      <div className="batch-cat">{cat}</div>
+                      {RESOLUTIONS.filter((r) => r.category === cat).map((r) => {
+                        const key = `${r.width}x${r.height}`;
+                        return (
+                          <label key={key} className="batch-row">
+                            <input
+                              type="checkbox"
+                              checked={batch.has(key)}
+                              disabled={busy}
+                              onChange={(e) =>
+                                setBatch((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(key);
+                                  else next.delete(key);
+                                  return next;
+                                })
+                              }
+                            />
+                            <span>{r.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="btn-row">
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() =>
+                    setBatch(new Set(RESOLUTIONS.map((r) => `${r.width}x${r.height}`)))
+                  }
+                >
+                  Select all
+                </button>
+                <button className="btn" disabled={busy} onClick={() => setBatch(new Set())}>
+                  Clear
+                </button>
+              </div>
+
+              <div className="field">
+                <label>Supersampling</label>
+                <div className="seg">
+                  {[1, 2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      className={ssaa === n ? 'on' : ''}
+                      onClick={() => setSsaa(n)}
+                      disabled={busy}
+                    >
+                      {n}×
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Format</label>
+                <div className="seg">
+                  {FORMATS.map((f, i) => (
+                    <button
+                      key={f.label}
+                      className={formatIdx === i ? 'on' : ''}
+                      onClick={() => setFormatIdx(i)}
+                      disabled={busy}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="note">
+                Every selected size is rendered from this same look and packed into one ZIP.
+                Supersampling is worked out per size, so an 8K entry may quietly use a lower
+                factor than a phone one.
+              </p>
+            </>
+          )}
+
+          {tab === 'image' && (
             <>
               <div className="field">
                 <label>Supersampling</label>
@@ -306,7 +462,9 @@ export default function ExportDialog({
                 {megapixels > 20 && ' · large exports can take a while'}
               </p>
             </>
-          ) : (
+          )}
+
+          {tab === 'video' && (
             <>
               <div className="field-grid">
                 <div className="field">
@@ -416,14 +574,14 @@ export default function ExportDialog({
             </>
           )}
 
-          {tooBig && (
+          {tab !== 'batch' && tooBig && (
             <p className="note error">
               {size.width}×{size.height} exceeds this GPU's maximum render size of {max} px. Reduce
               the resolution.
             </p>
           )}
 
-          {!tooBig && effectiveSsaa < activeSsaa && plan.limit === 'memory' && (
+          {tab !== 'batch' && !tooBig && effectiveSsaa < activeSsaa && plan.limit === 'memory' && (
             <p className="note warn">
               Supersampling reduced to {effectiveSsaa}× — bloom and depth of field render into a
               16-bit float buffer, and {activeSsaa}× at {size.width}×{size.height} would need over
@@ -431,7 +589,7 @@ export default function ExportDialog({
             </p>
           )}
 
-          {!tooBig && effectiveSsaa < activeSsaa && plan.limit === 'size' && (
+          {tab !== 'batch' && !tooBig && effectiveSsaa < activeSsaa && plan.limit === 'size' && (
             <p className="note warn">
               Supersampling reduced to {effectiveSsaa}× — {activeSsaa}× would need a{' '}
               {size.width * activeSsaa}×{size.height * activeSsaa} buffer, past this GPU's {max} px
@@ -455,11 +613,19 @@ export default function ExportDialog({
           <button className="btn" onClick={cancel}>
             Cancel
           </button>
-          {tab === 'image' ? (
+          {tab === 'image' && (
             <button className="btn primary" onClick={runImage} disabled={busy || tooBig}>
               {busy ? `Rendering ${Math.round(progress * 100)}%` : 'Render & download'}
             </button>
-          ) : (
+          )}
+          {tab === 'batch' && (
+            <button className="btn primary" onClick={runBatch} disabled={busy || batch.size === 0}>
+              {busy
+                ? `Rendering ${Math.round(progress * 100)}%`
+                : `Render ${batch.size || ''} & download ZIP`}
+            </button>
+          )}
+          {tab === 'video' && (
             <button
               className="btn primary"
               onClick={runVideo}

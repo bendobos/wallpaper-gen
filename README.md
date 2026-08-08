@@ -347,6 +347,37 @@ on an RTX 4090). A 4K still at 2× with both effects on takes ~0.23 s, against
 liquid shader's hundreds of noise evaluations, which is also why it is the one
 part of a large export that is *not* split into scissored bands.
 
+## Workflow
+
+**Batch export** renders the current look at every selected resolution and
+delivers one ZIP. One archive rather than N downloads because browsers throttle
+or silently block repeated automatic downloads, and a folder of wallpapers is
+what you wanted anyway. Supersampling is planned per size, so an 8K entry can
+quietly use a lower factor than a phone one in the same archive.
+
+[`zip.ts`](src/params/zip.ts) writes the container by hand, store method only —
+about seventy lines with no dependency. Compression would be pointless: every
+file going in is already a PNG, JPEG or WebP.
+
+**Palette from an image** builds a ramp from a photo's colours by median cut.
+Deterministic, unlike k-means, so the same picture always gives the same ramp,
+and the result is a plain gradient string that travels in a share link like any
+other parameter.
+
+The ends are anchored to the image's actual extremes *before* quantising, which
+is not an embellishment — median cut splits a box at its median pixel, so an
+image that is 94% mid-tone splits into two mid-tone halves and a small highlight
+stays buried however many colours you ask for. Measured on exactly that image
+the palette came back as three copies of the same brown with both ends lost.
+Choosing which box to split differently does not help; the median is the
+problem, not the selection. Anchors are averaged over the darkest and brightest
+2% so a single stuck pixel cannot set the end of a ramp.
+
+**Keep shelf** pins looks worth returning to. Undo is a single linear stack, so
+a good result found two experiments ago is otherwise gone. Capped at 40 entries
+— localStorage is a ~5 MB budget shared with saved presets, and each thumbnail
+is about 8 KB.
+
 ## Export
 
 Renders into an offscreen framebuffer at `size × supersampling`, box-filters it
@@ -422,8 +453,8 @@ inherent to any seamless loop.
 
 ## Shortcuts
 
-`Space` play/pause · `R` randomize · `S` new seed · `E` export · `F` fullscreen ·
-`Esc` leave fullscreen · `Ctrl+Z` undo
+`Space` play/pause · `R` randomize · `S` new seed · `V` variations · `K` keep ·
+`E` export · `F` fullscreen · `Esc` leave fullscreen · `Ctrl+Z` undo
 
 Fullscreen hides the panel and gives the preview the whole screen, still
 letterboxed to the export aspect — so a portrait phone wallpaper previews
@@ -442,8 +473,9 @@ src/
                  downsample.frag / blur.frag / post.frag   the lens chain
                  resolve.frag   supersampling box filter
   params/      schema (single source of truth), presets, gradients, matcaps,
-               serialisation, resolutions
-  ui/          control panel, param rows, preset bar, export dialog, variations
+               palette extraction, zip writer, serialisation, resolutions
+  ui/          control panel, param rows, preset bar, export dialog, variations,
+               keep shelf
   App.tsx      layout, render loop, undo, shortcuts
 ```
 

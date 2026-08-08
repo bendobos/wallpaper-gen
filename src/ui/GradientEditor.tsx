@@ -6,6 +6,7 @@ import {
   toCss,
   type Stop,
 } from '../params/gradient';
+import { imageToPalette } from '../params/palette';
 
 interface Props {
   value: string;
@@ -24,8 +25,27 @@ interface Props {
  */
 export default function GradientEditor({ value, onChange, onCommitStart }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const dragging = useRef<number | null>(null);
+
+  /**
+   * Builds a ramp from an image's colours. Unlike a custom matcap the result is
+   * a plain gradient string, so it travels in a share link like anything else.
+   */
+  const fromImage = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const spec = await imageToPalette(file);
+      onCommitStart?.();
+      onChange(spec);
+      setSelected(0);
+    } catch {
+      setError(`Could not read “${file.name}” as an image.`);
+    }
+  };
 
   const stops = parseGradient(value);
   const active = Math.min(selected, stops.length - 1);
@@ -137,6 +157,23 @@ export default function GradientEditor({ value, onChange, onCommitStart }: Props
           {Math.round(stops[active].pos * 100)}% · {stops.length} stops
         </span>
         <span className="spacer" />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            void fromImage(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+        <button
+          className="btn"
+          onClick={() => fileRef.current?.click()}
+          title="Build a ramp from the colours in an image"
+        >
+          ⤒ Image
+        </button>
         <button
           className="btn"
           onClick={() => removeStop(active)}
@@ -146,6 +183,8 @@ export default function GradientEditor({ value, onChange, onCommitStart }: Props
           −
         </button>
       </div>
+
+      {error && <p className="note error">{error}</p>}
     </div>
   );
 }

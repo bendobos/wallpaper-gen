@@ -6,12 +6,16 @@ import { bakeMatcap, ENV_CUSTOM, ENV_PROCEDURAL } from './params/matcaps';
 import {
   decodeParams,
   encodeParams,
+  loadKeptLooks,
   loadStoredParams,
   loadUserPresets,
+  MAX_KEPT,
   randomizeParams,
   randomSeed,
+  storeKeptLooks,
   storeParams,
   storeUserPresets,
+  type KeptLook,
   type StoredPreset,
 } from './params/serialize';
 import ControlPanel from './ui/ControlPanel';
@@ -20,6 +24,7 @@ import ExportDialog from './ui/ExportDialog';
 import LoopSpeed from './ui/LoopSpeed';
 import VariationsGrid from './ui/VariationsGrid';
 import MatcapUpload from './ui/MatcapUpload';
+import KeepShelf from './ui/KeepShelf';
 
 const MAX_UNDO = 60;
 
@@ -52,6 +57,7 @@ export default function App() {
   const [showVariations, setShowVariations] = useState(false);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [userPresets, setUserPresets] = useState<StoredPreset[]>(() => loadUserPresets());
+  const [kept, setKept] = useState<KeptLook[]>(() => loadKeptLooks());
   const [displaySize, setDisplaySize] = useState({ w: 640, h: 360 });
   const [toast, setToast] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
@@ -296,6 +302,44 @@ export default function App() {
     [showToast],
   );
 
+  /**
+   * Pins the current look with a thumbnail. Rendered off the same path exports
+   * use, at the export aspect so the tile frames what you would actually get.
+   */
+  const keepCurrent = useCallback(async () => {
+    const r = rendererRef.current;
+    if (!r) return;
+    try {
+      const height = Math.max(36, Math.round((240 * output.height) / output.width));
+      const { canvas } = await r.exportImage(paramsRef.current, timeRef.current, {
+        width: 240,
+        height,
+        ssaa: 1,
+      });
+      const look: KeptLook = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        params: paramsRef.current,
+        thumb: canvas.toDataURL('image/jpeg', 0.82),
+      };
+      setKept((list) => {
+        const next = [look, ...list].slice(0, MAX_KEPT);
+        storeKeptLooks(next);
+        return next;
+      });
+      showToast('Kept');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not keep this look');
+    }
+  }, [output, showToast]);
+
+  const removeKept = useCallback((id: string) => {
+    setKept((list) => {
+      const next = list.filter((l) => l.id !== id);
+      storeKeptLooks(next);
+      return next;
+    });
+  }, []);
+
   const deletePreset = useCallback((name: string) => {
     setUserPresets((list) => {
       const next = list.filter((p) => p.name !== name);
@@ -410,6 +454,9 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'v') {
         e.preventDefault();
         setShowVariations((v) => !v);
+      } else if (e.key.toLowerCase() === 'k' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        void keepCurrent();
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleImmersive();
@@ -421,7 +468,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, togglePlay, pushUndo, openExport, toggleImmersive, exitImmersive]);
+  }, [undo, togglePlay, pushUndo, openExport, toggleImmersive, exitImmersive, keepCurrent]);
 
   // ---------------------------------------------------------------- view --
 
@@ -492,6 +539,13 @@ export default function App() {
           >
             ▦ Variations
           </button>
+          <button
+            className="btn"
+            onClick={() => void keepCurrent()}
+            title="Pin this look to the shelf (K)"
+          >
+            ☆ Keep
+          </button>
           <button className="btn" onClick={undo} title="Undo (Ctrl+Z)">
             ↶ Undo
           </button>
@@ -545,6 +599,16 @@ export default function App() {
         <div className="panel-head">
           <div className="brand">Liquid · Wallpaper Generator</div>
         </div>
+
+        <KeepShelf
+          looks={kept}
+          onApply={(next) => {
+            pushUndo();
+            setParams(next);
+            setActivePreset(null);
+          }}
+          onRemove={removeKept}
+        />
 
         <div className="panel-scroll">
           <PresetBar

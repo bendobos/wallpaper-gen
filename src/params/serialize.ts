@@ -219,6 +219,53 @@ export function loadUserPresets(): StoredPreset[] {
   }
 }
 
+/** A look pinned to the shelf, with a thumbnail to recognise it by. */
+export interface KeptLook {
+  id: string;
+  params: Params;
+  /** Small JPEG data URL, roughly 8 KB at the size VariationsGrid renders. */
+  thumb: string;
+}
+
+const STORAGE_SHELF = 'wallpaper-gen:shelf';
+
+/**
+ * Cap on pinned looks. localStorage is a ~5 MB budget shared with the saved
+ * presets and the current state, and each thumbnail is about 8 KB, so this
+ * leaves plenty of headroom while still being more than anyone pins in a
+ * session.
+ */
+export const MAX_KEPT = 40;
+
+export function loadKeptLooks(): KeptLook[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_SHELF);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e) => e && typeof e.id === 'string' && typeof e.thumb === 'string')
+      .slice(0, MAX_KEPT)
+      .map((e) => ({ id: String(e.id), thumb: String(e.thumb), params: sanitize(e.params) }));
+  } catch {
+    return [];
+  }
+}
+
+export function storeKeptLooks(list: KeptLook[]) {
+  try {
+    localStorage.setItem(
+      STORAGE_SHELF,
+      JSON.stringify(
+        list.map((l) => ({ id: l.id, thumb: l.thumb, params: diffFromDefaults(l.params) })),
+      ),
+    );
+  } catch {
+    // Quota exceeded, most likely. The shelf is a convenience — losing the
+    // persistence is better than taking the app down with an exception.
+  }
+}
+
 export function storeUserPresets(list: StoredPreset[]) {
   try {
     localStorage.setItem(

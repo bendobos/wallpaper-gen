@@ -36,6 +36,12 @@ uniform float uNoiseBasis;  // 1 = cellular F1, 2 = cellular F2-F1
 uniform float uCurl;
 uniform float uCurlScale;
 #endif
+#ifdef FEAT_SHAPE
+uniform float uShape;       // 1 circle, 2 rounded square, 3 arch, 4 band, 5 blob
+uniform float uShapeSize;
+uniform float uShapeEdge;
+uniform float uShapeInvert;
+#endif
 
 // surface
 uniform float uRelief;
@@ -232,6 +238,43 @@ vec2 curlFlow(vec2 p) {
 }
 #endif
 
+#ifdef FEAT_SHAPE
+float sdRoundedBox(vec2 p, vec2 b, float r) {
+  vec2 d = abs(p) - b + r;
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;
+}
+
+/**
+ * Signed distance to the composition shape, in world space.
+ *
+ * World space, not screen space, so Pan, Zoom and Rotation move and size it —
+ * reusing three controls that already exist instead of growing a second
+ * positioning system beside them.
+ *
+ * Evaluated on the raw `p` rather than on the flow-transformed `q`, so Stretch
+ * and Flow Angle skew the liquid inside the shape without skewing the shape
+ * itself.
+ */
+float shapeDistance(vec2 p) {
+  float r = max(uShapeSize, 0.01);
+
+  if (uShape < 1.5) return length(p) - r;
+  if (uShape < 2.5) return sdRoundedBox(p, vec2(r), r * 0.28);
+  if (uShape < 3.5) {
+    // A column with a semicircular top: the poster arch.
+    float column = sdRoundedBox(p + vec2(0.0, r), vec2(r, r), 0.0);
+    return min(column, length(p) - r);
+  }
+  if (uShape < 4.5) return abs(p.y) - r;
+
+  // Blob: a circle whose radius wobbles with angle. Two harmonics read as
+  // organic; more starts to look like a gear.
+  float a = atan(p.y, p.x);
+  float wob = 0.14 * sin(a * 3.0 + uSeed) + 0.09 * sin(a * 5.0 - uSeed * 0.7);
+  return length(p) - r * (1.0 + wob);
+}
+#endif
+
 // The surface height at a point in world space. Everything about the shape
 // lives here: anisotropic stretch, domain warp, ridging, crease contrast.
 float heightAt(vec2 p) {
@@ -276,6 +319,19 @@ float heightAt(vec2 p) {
   // regions to a constant and kill their normals.
   float s = (h - 0.5) * mix(1.0, 5.0, uCrease);
   h = 0.5 + 0.5 * s / (1.0 + abs(s));
+
+#ifdef FEAT_SHAPE
+  float m = 1.0 - smoothstep(-max(uShapeEdge, 0.001), 0.0, shapeDistance(p));
+  if (uShapeInvert > 0.5) m = 1.0 - m;
+  // Flattening the height outside the shape is the whole trick. A constant
+  // height has zero gradient, so the normal points straight back at the viewer
+  // and reflects one patch of environment — which reads as background rather
+  // than as a hole. And because this happens inside heightAt, surfaceNormal's
+  // offset samples see it too, so the transition band gets real normals and
+  // the edge rounds off like a poured rim. Masking the output colour instead
+  // would give a flat cut-out with a hard edge.
+  h = mix(0.5, h, m);
+#endif
 
   return h;
 }

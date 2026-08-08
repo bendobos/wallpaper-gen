@@ -73,6 +73,20 @@ export const PARAM_SCHEMA = [
     min: -4, max: 4, step: 0.01, default: 0, random: [-2, 2] },
   { kind: 'slider', key: 'rotation', label: 'Rotation', group: 'Composition', uniform: 'uRotation',
     min: -180, max: 180, step: 1, default: 0, random: [-180, 180] },
+  // The shape lives in world space, so Pan, Zoom and Rotation position it —
+  // no second set of placement controls. No random band: switching shape is a
+  // change of subject, not a variation of one.
+  { kind: 'select', key: 'shape', label: 'Shape', group: 'Composition', uniform: 'uShape',
+    options: ['None', 'Circle', 'Rounded Square', 'Arch', 'Band', 'Blob'], default: 0,
+    hint: 'Confines the liquid to a shape and flattens the rest to background. Applied to the height field, not to the colour, so the edge rounds off like a poured rim instead of reading as a cut-out.' },
+  { kind: 'slider', key: 'shapeSize', label: 'Shape Size', group: 'Composition', uniform: 'uShapeSize',
+    min: 0.05, max: 2, step: 0.01, default: 0.35, random: [0.25, 0.8],
+    hint: 'In world units — the frame is 1 unit tall at Zoom 1, so 0.5 fills it.' },
+  { kind: 'slider', key: 'shapeEdge', label: 'Shape Edge', group: 'Composition', uniform: 'uShapeEdge',
+    min: 0.002, max: 0.5, step: 0.002, default: 0.06,
+    hint: 'Width of the rim. Narrow gives a sharp lip, wide melts the shape into the background.' },
+  { kind: 'select', key: 'shapeInvert', label: 'Shape Mode', group: 'Composition', uniform: 'uShapeInvert',
+    options: ['Fill', 'Cut out'], default: 0 },
 
   // ------------------------------------------------------------------- flow
   // No random band: the three bases are different enough that shuffling

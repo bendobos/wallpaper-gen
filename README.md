@@ -72,6 +72,35 @@ Every parameter is defined once in [`src/params/schema.ts`](src/params/schema.ts
 which drives both the control panel and the uniform upload — adding a slider is
 a one-line change.
 
+## Composition shapes
+
+**Shape** confines the liquid to a circle, rounded square, arch, band or blob
+and flattens the rest to background — the difference between a texture swatch
+and an image.
+
+The mask is applied **inside `heightAt`**, not as a multiply on the output
+colour. That is the whole trick, and it is worth being precise about why:
+
+- Outside the shape the height goes constant. A constant height has zero
+  gradient, so the normal points straight back at the viewer and the surface
+  reflects a single patch of environment. That reads as a backdrop rather than
+  as a hole punched in the image.
+- `surfaceNormal` samples `heightAt` at offsets, so it sees the mask too. The
+  transition band therefore gets a real height gradient and the edge rounds off
+  like a poured rim. Masking the colour instead would give a flat cut-out with
+  a hard edge and no lighting on it at all.
+
+The shape lives in **world space**, so Pan, Zoom and Rotation position and size
+it — three controls that already exist, rather than a second placement system
+beside them. It is evaluated on the raw world point rather than the
+flow-transformed one, so Stretch and Flow Angle skew the liquid *inside* the
+shape without skewing the shape itself.
+
+Note that the background is a flat mirror, so it reflects whatever the
+environment is: with the procedural studio you will see its softbox strips as
+soft horizontal bands. Softbox Count, Key Intensity and Background all shape
+it, and a matcap replaces it wholesale.
+
 ## Shape vocabulary
 
 Every image used to be fbm plus domain warp. Two controls widen that.
